@@ -13,8 +13,10 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <sys/time.h>
 #include <time.h>
 #include <math.h>
+#include <malloc.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
@@ -38,6 +40,10 @@
 
 #ifdef GGML_USE_LLAMAFILE
 #include "sgemm.h"
+#endif
+
+#ifndef M_PI
+    #define M_PI 3.14159265358979323846
 #endif
 
 #if defined(_MSC_VER)
@@ -219,6 +225,9 @@ inline static void * ggml_aligned_malloc(size_t size) {
     int result = hbw_posix_memalign(&aligned_memory, 16, size);
 #elif GGML_USE_METAL
     int result = posix_memalign(&aligned_memory, sysconf(_SC_PAGESIZE), size);
+#elif _EBBRT_
+    aligned_memory = memalign(GGML_MEM_ALIGN, size);
+    int result = 0;
 #else
     int result = posix_memalign(&aligned_memory, GGML_MEM_ALIGN, size);
 #endif
@@ -458,15 +467,29 @@ int64_t ggml_time_us(void) {
 #else
 void ggml_time_init(void) {}
 int64_t ggml_time_ms(void) {
+#ifdef _EBBRT_
+  struct timeval tv;
+  if (gettimeofday(&tv, NULL) < 0)
+    return 0;
+  return (int64_t)tv.tv_sec*1000 + (int64_t)tv.tv_usec/1000;
+#else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (int64_t)ts.tv_sec*1000 + (int64_t)ts.tv_nsec/1000000;
+#endif
 }
 
 int64_t ggml_time_us(void) {
+#ifdef _EBBRT_
+  struct timeval tv;
+  if (gettimeofday(&tv, NULL) < 0)
+    return 0;
+  return (int64_t)tv.tv_sec*1000000 + (int64_t)tv.tv_usec;
+#else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (int64_t)ts.tv_sec*1000000 + (int64_t)ts.tv_nsec/1000;
+#endif
 }
 #endif
 
@@ -2454,7 +2477,9 @@ inline static void ggml_critical_section_start(void) {
     while (processing > 0) {
         // wait for other threads to finish
         atomic_fetch_sub(&g_state_barrier, 1);
+#ifndef _EBBRT_
         sched_yield(); // TODO: reconsider this
+#endif
         processing = atomic_fetch_add(&g_state_barrier, 1);
     }
 }
@@ -11990,7 +12015,9 @@ UseGgmlGemm2:;
 
     // threads with no work simply yield (not sure if it helps)
     if (ir010 >= ir011 || ir110 >= ir111) {
+#ifndef _EBBRT_
         sched_yield();
+#endif
         return;
     }
 
@@ -19047,11 +19074,12 @@ typedef int ggml_lock_t;
 
 #define GGML_LOCK_INITIALIZER 0
 
+#ifndef _EBBRT_
 typedef pthread_t ggml_thread_t;
 
 #define ggml_thread_create pthread_create
 #define ggml_thread_join   pthread_join
-
+#endif
 #endif
 
 // Android's libc implementation "bionic" does not support setting affinity
@@ -19147,7 +19175,9 @@ struct ggml_compute_state_shared {
 };
 
 struct ggml_compute_state {
+#ifndef _EBBRT_
     ggml_thread_t thrd;
+#endif
     int ith;
     struct ggml_compute_state_shared * shared;
     enum ggml_status ec;
@@ -19420,7 +19450,9 @@ static void ggml_graph_compute_thread_sync_node(int * node_n, struct ggml_comput
 
     while (true) {
         if (do_yield) {
+#ifndef _EBBRT_
             sched_yield();
+#endif
         }
 
         * node_n = atomic_load(&state->shared->node_n);
@@ -19434,7 +19466,9 @@ static void ggml_graph_compute_thread_sync_task(int * task_phase, struct ggml_co
 
     while (true) {
         if (do_yield) {
+#ifndef _EBBRT_
             sched_yield();
+#endif
         }
 
         * task_phase = atomic_load(&state->shared->node_task);
@@ -19822,6 +19856,7 @@ enum ggml_status ggml_graph_compute(struct ggml_cgraph * cgraph, struct ggml_cpl
     };
     struct ggml_compute_state * workers = alloca(sizeof(struct ggml_compute_state)*n_threads);
     
+#ifndef _EBBRT_
     // create thread pool
     if (n_threads > 1) {
         for (int j = 1; j < n_threads; ++j) {
@@ -19837,7 +19872,7 @@ enum ggml_status ggml_graph_compute(struct ggml_cgraph * cgraph, struct ggml_cpl
             UNUSED(rc);
         }
     }
-
+#endif
     workers[0].ith = 0;
     workers[0].shared = &state_shared;
     workers[0].ec = GGML_STATUS_SUCCESS;
@@ -19852,6 +19887,7 @@ enum ggml_status ggml_graph_compute(struct ggml_cgraph * cgraph, struct ggml_cpl
     // don't leave affinity set on the main thread
     clear_numa_thread_affinity();
 
+#ifndef _EBBRT_
     // join or kill thread pool
     if (n_threads > 1) {
         for (int j = 1; j < n_threads; j++) {
@@ -19861,6 +19897,7 @@ enum ggml_status ggml_graph_compute(struct ggml_cgraph * cgraph, struct ggml_cpl
                 compute_status = workers[j].ec;
         }
     }
+#endif
 
     // performance stats (graph)
     {
