@@ -91,6 +91,10 @@
 #include <type_traits>
 #include <unordered_map>
 
+#ifdef _EBBRT_
+#define PATH_MAX        4096
+#endif
+
 #if defined(_MSC_VER)
 #pragma warning(disable: 4244 4267) // possible loss of data
 #endif
@@ -1136,6 +1140,15 @@ static llama_rope_scaling_type llama_rope_scaling_type_from_string(const std::st
     return LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED;
 }
 
+#ifdef _EBBRT_
+template<typename T>
+std::string to_string(const T& value) {
+  std::ostringstream oss;
+  oss << value;
+  return oss.str();
+}
+#endif
+
 static std::string gguf_data_to_str(enum gguf_type type, const void * data, int i) {
     switch (type) {
         case GGUF_TYPE_UINT8:   return std::to_string(((const uint8_t  *)data)[i]);
@@ -1146,8 +1159,13 @@ static std::string gguf_data_to_str(enum gguf_type type, const void * data, int 
         case GGUF_TYPE_INT32:   return std::to_string(((const int32_t  *)data)[i]);
         case GGUF_TYPE_UINT64:  return std::to_string(((const uint64_t *)data)[i]);
         case GGUF_TYPE_INT64:   return std::to_string(((const int64_t  *)data)[i]);
+#ifdef _EBBRT_
+        case GGUF_TYPE_FLOAT32: return to_string(((const float    *)data)[i]);
+        case GGUF_TYPE_FLOAT64: return to_string(((const double   *)data)[i]);
+#else
         case GGUF_TYPE_FLOAT32: return std::to_string(((const float    *)data)[i]);
         case GGUF_TYPE_FLOAT64: return std::to_string(((const double   *)data)[i]);
+#endif
         case GGUF_TYPE_BOOL:    return ((const bool *)data)[i] ? "true" : "false";
         default:                return format("unknown type %d", type);
     }
