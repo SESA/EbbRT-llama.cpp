@@ -31,6 +31,10 @@
 #include <utility> // declval, forward, move, pair, swap
 #include <vector> // vector
 
+#ifdef _EBBRT_
+#include <ebbrt/Debug.h>
+#endif
+
 // #include <nlohmann/adl_serializer.hpp>
 //     __ _____ _____ _____
 //  __|  |   __|     |   | |  JSON for Modern C++
@@ -8284,7 +8288,11 @@ class lexer : public lexer_base<BasicJsonType>
     JSON_HEDLEY_NON_NULL(2)
     static void strtof(float& f, const char* str, char** endptr) noexcept
     {
+#ifndef _EBBRT_
         f = std::strtof(str, endptr);
+#else
+	EBBRT_UNIMPLEMENTED();
+#endif
     }
 
     JSON_HEDLEY_NON_NULL(2)
@@ -8296,7 +8304,11 @@ class lexer : public lexer_base<BasicJsonType>
     JSON_HEDLEY_NON_NULL(2)
     static void strtof(long double& f, const char* str, char** endptr) noexcept
     {
+#ifndef _EBBRT_
         f = std::strtold(str, endptr);
+#else
+	EBBRT_UNIMPLEMENTED();
+#endif
     }
 
     /*!
@@ -8623,7 +8635,12 @@ scan_number_done:
         // try to parse integers first and fall back to floats
         if (number_type == token_type::value_unsigned)
         {
-            const auto x = std::strtoull(token_buffer.data(), &endptr, 10);
+#ifndef _EBBRT_
+	  const auto x = std::strtoull(token_buffer.data(), &endptr, 10);
+#else
+	  unsigned long long int x = 0;
+	  EBBRT_UNIMPLEMENTED();	  
+#endif
 
             // we checked the number format before
             JSON_ASSERT(endptr == token_buffer.data() + token_buffer.size());
@@ -8639,8 +8656,12 @@ scan_number_done:
         }
         else if (number_type == token_type::value_integer)
         {
+#ifndef _EBBRT_
             const auto x = std::strtoll(token_buffer.data(), &endptr, 10);
-
+#else
+	    long int x = 0;
+	    EBBRT_UNIMPLEMENTED();
+#endif
             // we checked the number format before
             JSON_ASSERT(endptr == token_buffer.data() + token_buffer.size());
 
@@ -8828,7 +8849,11 @@ scan_number_done:
             {
                 // escape control characters
                 std::array<char, 9> cs{{}};
+#ifndef _EBBRT_
                 static_cast<void>((std::snprintf)(cs.data(), cs.size(), "<U+%.4X>", static_cast<unsigned char>(c))); // NOLINT(cppcoreguidelines-pro-type-vararg,hicpp-vararg)
+#else
+		static_cast<void>((snprintf)(cs.data(), cs.size(), "<U+%.4X>", static_cast<unsigned char>(c))); // NOLINT(cppcoreguidelines-pro-type-vararg,hicpp-vararg)
+#endif
                 result += cs.data();
             }
             else
@@ -9474,7 +9499,11 @@ class binary_reader
             default: // anything else not supported (yet)
             {
                 std::array<char, 3> cr{{}};
+#ifndef _EBBRT_
                 static_cast<void>((std::snprintf)(cr.data(), cr.size(), "%.2hhX", static_cast<unsigned char>(element_type))); // NOLINT(cppcoreguidelines-pro-type-vararg,hicpp-vararg)
+#else
+		static_cast<void>((snprintf)(cr.data(), cr.size(), "%.2hhX", static_cast<unsigned char>(element_type))); // NOLINT(cppcoreguidelines-pro-type-vararg,hicpp-vararg)
+#endif
                 const std::string cr_str{cr.data()};
                 return sax->parse_error(element_type_parse_position, cr_str,
                                         parse_error::create(114, element_type_parse_position, concat("Unsupported BSON record type 0x", cr_str), nullptr));
@@ -12046,7 +12075,11 @@ class binary_reader
     std::string get_token_string() const
     {
         std::array<char, 3> cr{{}};
+#ifndef _EBBRT_
         static_cast<void>((std::snprintf)(cr.data(), cr.size(), "%.2hhX", static_cast<unsigned char>(current))); // NOLINT(cppcoreguidelines-pro-type-vararg,hicpp-vararg)
+#else
+	static_cast<void>((snprintf)(cr.data(), cr.size(), "%.2hhX", static_cast<unsigned char>(current))); // NOLINT(cppcoreguidelines-pro-type-vararg,hicpp-vararg)
+#endif
         return std::string{cr.data()};
     }
 
@@ -14036,7 +14069,12 @@ class json_pointer
         const char* p = s.c_str();
         char* p_end = nullptr;
         errno = 0; // strtoull doesn't reset errno
+#ifndef _EBBRT_
         const unsigned long long res = std::strtoull(p, &p_end, 10); // NOLINT(runtime/int)
+#else
+	const unsigned long long res = 0;
+	EBBRT_UNIMPLEMENTED();
+#endif
         if (p == p_end // invalid input or empty string
                 || errno == ERANGE // out of range
                 || JSON_HEDLEY_UNLIKELY(static_cast<std::size_t>(p_end - p) != s.size())) // incomplete read
@@ -18474,17 +18512,29 @@ class serializer
                             {
                                 if (codepoint <= 0xFFFF)
                                 {
-                                    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg,hicpp-vararg)
+#ifndef _EBBRT_
+				    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg,hicpp-vararg)
                                     static_cast<void>((std::snprintf)(string_buffer.data() + bytes, 7, "\\u%04x",
                                                                       static_cast<std::uint16_t>(codepoint)));
+#else
+				    static_cast<void>((snprintf)(string_buffer.data() + bytes, 7, "\\u%04x",
+                                                                      static_cast<std::uint16_t>(codepoint)));
+#endif
                                     bytes += 6;
                                 }
                                 else
                                 {
+#ifndef _EBBRT_
                                     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg,hicpp-vararg)
-                                    static_cast<void>((std::snprintf)(string_buffer.data() + bytes, 13, "\\u%04x\\u%04x",
+				    static_cast<void>((std::snprintf)(string_buffer.data() + bytes, 13, "\\u%04x\\u%04x",
                                                                       static_cast<std::uint16_t>(0xD7C0u + (codepoint >> 10u)),
                                                                       static_cast<std::uint16_t>(0xDC00u + (codepoint & 0x3FFu))));
+#else
+				    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg,hicpp-vararg)
+				    static_cast<void>((snprintf)(string_buffer.data() + bytes, 13, "\\u%04x\\u%04x",
+                                                                      static_cast<std::uint16_t>(0xD7C0u + (codepoint >> 10u)),
+                                                                      static_cast<std::uint16_t>(0xDC00u + (codepoint & 0x3FFu))));
+#endif
                                     bytes += 12;
                                 }
                             }
@@ -18841,8 +18891,11 @@ class serializer
 
         // the actual conversion
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg,hicpp-vararg)
+#ifndef _EBBRT_
         std::ptrdiff_t len = (std::snprintf)(number_buffer.data(), number_buffer.size(), "%.*g", d, x);
-
+#else
+	std::ptrdiff_t len = (snprintf)(number_buffer.data(), number_buffer.size(), "%.*g", d, x);
+#endif
         // negative value indicates an error
         JSON_ASSERT(len > 0);
         // check if buffer was large enough

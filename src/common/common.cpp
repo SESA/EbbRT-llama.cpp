@@ -37,7 +37,9 @@
 #include <fcntl.h>
 #include <io.h>
 #else
+#ifndef _EBBRT_
 #include <sys/ioctl.h>
+#endif
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
@@ -282,6 +284,8 @@ bool parse_kv_override(const char * data, std::vector<llama_model_kv_override> &
 }
 
 bool gpt_params_find_arg(int argc, char ** argv, const std::string & arg, gpt_params & params, int & i, bool & invalid_param) {
+  
+#ifndef _EBBRT_
     llama_sampling_params & sparams = params.sparams;
 
     if (arg == "-s" || arg == "--seed") {
@@ -1333,7 +1337,7 @@ bool gpt_params_find_arg(int argc, char ** argv, const std::string & arg, gpt_pa
     }
     // End of Parse args for logging parameters
 #endif // LOG_DISABLE_LOGS
-
+#endif // _EBBRT_
     return false;
 }
 
@@ -2883,7 +2887,11 @@ static llama_control_vector_data llama_control_vector_load_one(const llama_contr
             size_t dotpos = name.find('.');
             if (dotpos != std::string::npos && name.substr(0, dotpos) == "direction") {
                 try {
-                    uint32_t layer = std::stoi(name.substr(dotpos + 1));
+#ifndef _EBBRT_
+		    uint32_t layer = std::stoi(name.substr(dotpos + 1));
+#else
+		    uint32_t layer = atoi(name.substr(dotpos + 1).c_str());
+#endif
                     if (layer == 0) {
                         fprintf(stderr, "%s: direction tensor invalid in %s\n", __func__, load_info.fname.c_str());
                         ggml_free(meta_ctx);
