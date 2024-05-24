@@ -355,15 +355,27 @@ private:
                     int max_times = std::numeric_limits<int>::max();
                     try {
                         if (nums.size() == 1) {
+#ifndef _EBBRT_
                             min_times = max_times = std::stoi(nums[0]);
+#else
+			    min_times = max_times = atoi(nums[0].c_str());
+#endif
                         } else if (nums.size() != 2) {
                             _errors.push_back("Wrong number of values in curly brackets");
                         } else {
                             if (!nums[0].empty()) {
+#ifndef _EBBRT_
                                 min_times = std::stoi(nums[0]);
+#else
+				min_times = atoi(nums[0].c_str());
+#endif
                             }
                             if (!nums[1].empty()) {
+#ifndef _EBBRT_
                                 max_times = std::stoi(nums[1]);
+#else
+				max_times = atoi(nums[1].c_str());
+#endif
                             }
                         }
                     } catch (const std::invalid_argument & e) {
