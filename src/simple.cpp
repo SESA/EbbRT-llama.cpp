@@ -6,7 +6,10 @@
 #include <string>
 #include <vector>
 
-int main(int argc, char ** argv) {
+void AppMain() {
+  return;
+}
+/*int main(int argc, char ** argv) {
     gpt_params params;
 
     if (argc == 1 || argv[1][0] == '-') {
@@ -180,4 +183,4 @@ int main(int argc, char ** argv) {
     llama_backend_free();
 
     return 0;
-}
+    }*/

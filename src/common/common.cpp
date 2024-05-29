@@ -107,8 +107,8 @@ int32_t get_num_physical_cores() {
 #elif defined(_WIN32)
     //TODO: Implement
 #endif
-    unsigned int n_threads = std::thread::hardware_concurrency();
-    return n_threads > 0 ? (n_threads <= 4 ? n_threads : n_threads / 2) : 4;
+    //unsigned int n_threads = std::thread::hardware_concurrency();
+    return 1; //n_threads > 0 ? (n_threads <= 4 ? n_threads : n_threads / 2) : 4;
 }
 
 #if defined(__x86_64__) && defined(__linux__) && !defined(__ANDROID__)
@@ -166,7 +166,8 @@ static int count_math_cpus(int cpu_count) {
  */
 int get_math_cpu_count() {
 #if defined(__x86_64__) && defined(__linux__) && !defined(__ANDROID__)
-    int cpu_count = sysconf(_SC_NPROCESSORS_ONLN);
+    //int cpu_count = sysconf(_SC_NPROCESSORS_ONLN);
+  int cpu_count = 1;
     if (cpu_count < 1) {
         return get_num_physical_cores();
     }
@@ -305,7 +306,8 @@ bool gpt_params_find_arg(int argc, char ** argv, const std::string & arg, gpt_pa
         }
         params.n_threads = std::stoi(argv[i]);
         if (params.n_threads <= 0) {
-            params.n_threads = std::thread::hardware_concurrency();
+	  params.n_threads=1;
+	  //params.n_threads = std::thread::hardware_concurrency();
         }
         return true;
     }
@@ -316,7 +318,8 @@ bool gpt_params_find_arg(int argc, char ** argv, const std::string & arg, gpt_pa
         }
         params.n_threads_batch = std::stoi(argv[i]);
         if (params.n_threads_batch <= 0) {
-            params.n_threads_batch = std::thread::hardware_concurrency();
+	  params.n_threads_batch=1;
+	  //params.n_threads_batch = std::thread::hardware_concurrency();
         }
         return true;
     }
@@ -327,7 +330,8 @@ bool gpt_params_find_arg(int argc, char ** argv, const std::string & arg, gpt_pa
         }
         params.n_threads_draft = std::stoi(argv[i]);
         if (params.n_threads_draft <= 0) {
-            params.n_threads_draft = std::thread::hardware_concurrency();
+	  params.n_threads_draft=1;
+	  //params.n_threads_draft = std::thread::hardware_concurrency();
         }
         return true;
     }
@@ -338,7 +342,8 @@ bool gpt_params_find_arg(int argc, char ** argv, const std::string & arg, gpt_pa
         }
         params.n_threads_batch_draft = std::stoi(argv[i]);
         if (params.n_threads_batch_draft <= 0) {
-            params.n_threads_batch_draft = std::thread::hardware_concurrency();
+	  params.n_threads_draft=1;
+	  //params.n_threads_batch_draft = std::thread::hardware_concurrency();
         }
         return true;
     }
@@ -1620,7 +1625,7 @@ std::string get_system_info(const gpt_params & params) {
     if (params.n_threads_batch != -1) {
         os << " (n_threads_batch = " << params.n_threads_batch << ")";
     }
-    os << " / " << std::thread::hardware_concurrency() << " | " << llama_print_system_info();
+    //os << " / " << std::thread::hardware_concurrency() << " | " << llama_print_system_info();
 
     return os.str();
 }
@@ -2735,7 +2740,7 @@ void dump_non_result_info_yaml(FILE * stream, const gpt_params & params, const l
     dump_vector_float_yaml(stream, "tensor_split", tensor_split_vector);
 
     fprintf(stream, "tfs: %f # default: 1.0\n", sparams.tfs_z);
-    fprintf(stream, "threads: %d # default: %u\n", params.n_threads, std::thread::hardware_concurrency());
+    //fprintf(stream, "threads: %d # default: %u\n", params.n_threads, std::thread::hardware_concurrency());
     fprintf(stream, "top_k: %d # default: 40\n", sparams.top_k);
     fprintf(stream, "top_p: %f # default: 0.95\n", sparams.top_p);
     fprintf(stream, "min_p: %f # default: 0.0\n", sparams.min_p);

@@ -224,7 +224,7 @@ inline static void * ggml_aligned_malloc(size_t size) {
 #ifdef GGML_USE_CPU_HBM
     int result = hbw_posix_memalign(&aligned_memory, 16, size);
 #elif GGML_USE_METAL
-    int result = posix_memalign(&aligned_memory, sysconf(_SC_PAGESIZE), size);
+    //    int result = posix_memalign(&aligned_memory, sysconf(_SC_PAGESIZE), size);
 #elif _EBBRT_
     aligned_memory = memalign(GGML_MEM_ALIGN, size);
     int result = 0;

@@ -92,6 +92,7 @@
 #include <unordered_map>
 
 #ifdef _EBBRT_
+#include <ebbrt/Debug.h>
 #define PATH_MAX        4096
 #endif
 
@@ -1378,7 +1379,8 @@ struct llama_mmap {
     void unmap_fragment(size_t first, size_t last) {
         // note: this function must not be called multiple times with overlapping ranges
         // otherwise, there is a risk of invalidating addresses that have been repurposed for other mappings
-        int page_size = sysconf(_SC_PAGESIZE);
+        //int page_size = sysconf(_SC_PAGESIZE);
+      int page_size = 4096;
         align_range(&first, &last, page_size);
         size_t len = last - first;
 
@@ -1552,7 +1554,8 @@ struct llama_mlock {
     static constexpr bool SUPPORTED = true;
 
     static size_t lock_granularity() {
-        return (size_t) sysconf(_SC_PAGESIZE);
+      return (size_t) 4096;
+      //return (size_t) sysconf(_SC_PAGESIZE);
     }
 
     #ifdef __APPLE__
@@ -14700,7 +14703,8 @@ static void llama_model_quantize_internal(const std::string & fname_inp, const s
     int nthread = params->nthread;
 
     if (nthread <= 0) {
-        nthread = std::thread::hardware_concurrency();
+      nthread=1;
+      //nthread = std::thread::hardware_concurrency();
     }
 
     // mmap consistently increases speed Linux, and also increases speed on Windows with
@@ -15468,6 +15472,7 @@ int64_t llama_time_us(void) {
 struct llama_model * llama_load_model_from_file(
         const char * path_model,
         struct llama_model_params   params) {
+#ifndef _EBBRT_
     ggml_time_init();
 
     llama_model * model = new llama_model;
@@ -15502,6 +15507,10 @@ struct llama_model * llama_load_model_from_file(
     }
 
     return model;
+#else
+    EBBRT_UNIMPLEMENTED();
+    return nullptr;
+#endif
 }
 
 void llama_free_model(struct llama_model * model) {
@@ -16033,6 +16042,7 @@ uint32_t llama_model_quantize(
         const char * fname_inp,
         const char * fname_out,
         const llama_model_quantize_params * params) {
+#ifndef _EBBRT_
     try {
         llama_model_quantize_internal(fname_inp, fname_out, params);
         return 0;
@@ -16040,6 +16050,9 @@ uint32_t llama_model_quantize(
         LLAMA_LOG_ERROR("%s: failed to quantize: %s\n", __func__, err.what());
         return 1;
     }
+#else
+    EBBRT_UNIMPLEMENTED();
+#endif
 }
 
 int32_t llama_model_apply_lora_from_file(const struct llama_model * model, const char * path_lora, float scale, const char * path_base_model, int32_t n_threads) {
