@@ -5,9 +5,86 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include <cstdlib>
+#include <sstream>
+
+#include <ebbrt/Debug.h>
+#include <ebbrt/native/Cpu.h>
+#include <ebbrt/native/Clock.h>
+#include <ebbrt/EventManager.h>
+#include <ebbrt/SharedIOBufRef.h>
+#include <ebbrt/StaticIOBuf.h>
+#include <ebbrt/UniqueIOBuf.h>
+#include <ebbrt/StaticSharedEbb.h>
+#include <ebbrt/AtomicUniquePtr.h>
+#include <ebbrt/CacheAligned.h>
+#include <ebbrt/SpinLock.h>
+#include <ebbrt/Future.h>
+#include <ebbrt/native/Msr.h>
+#include <ebbrt/native/Net.h>
+#include <ebbrt/native/NetTcpHandler.h>
+#include <ebbrt/native/RcuTable.h>
+#include <ebbrt/native/IxgbeDriver.h>
+#include <ebbrt/native/Trace.h>
+
+#define MCPU 1
+#define PORT 8888
+
+namespace ebbrt {    
+class TcpCommand : public StaticSharedEbb<TcpCommand>, public CacheAligned {
+public:
+  TcpCommand() {}
+  void Start(uint16_t port) {
+    listening_pcb_.Bind(port, [this](NetworkManager::TcpPcb pcb) {
+      // new connection callback
+      static std::atomic<size_t> cpu_index{MCPU};
+      pcb.BindCpu(MCPU);
+      auto connection = new TcpSession(std::move(pcb));
+      connection->Install();
+      ebbrt::kprintf_force("Core %u: TcpCommand connection created\n", static_cast<uint32_t>(ebbrt::Cpu::GetMine()));
+    });
+  }
+  
+private:
+  class TcpSession : public ebbrt::TcpHandler {
+  public:
+    TcpSession(ebbrt::NetworkManager::TcpPcb pcb)
+      : ebbrt::TcpHandler(std::move(pcb)) {
+      buf_ = nullptr;
+    }
+    void Close() {}
+    void Abort() {}
+    
+    void Receive(std::unique_ptr<MutIOBuf> b) {
+      kassert(b->Length() != 0);
+
+      if(buf_) {
+	buf_->PrependChain(std::move(b));	  
+      } else {
+	buf_ = std::move(b);
+      }
+      ebbrt::kprintf_force("len=%u\n", buf_->ComputeChainDataLength());
+    }
+          
+  private:
+    std::unique_ptr<ebbrt::MutIOBuf> buf_;
+    ebbrt::NetworkManager::TcpPcb pcb_;
+  };
+
+  NetworkManager::ListeningTcpPcb listening_pcb_;
+};
+}
 
 void AppMain() {
-  return;
+  ebbrt::kprintf_force("AppMain()\n");
+  
+  ebbrt::event_manager->SpawnRemote(
+    [] () mutable {
+      auto id = ebbrt::ebb_allocator->AllocateLocal();
+      auto mc = ebbrt::EbbRef<ebbrt::TcpCommand>(id);
+      mc->Start(PORT);
+      ebbrt::kprintf_force("TcpCommand server listening on port %d\n", PORT);
+    }, MCPU);
 }
 /*int main(int argc, char ** argv) {
     gpt_params params;
