@@ -15508,8 +15508,13 @@ struct llama_model * llama_load_model_from_file(
 
     return model;
 #else
+    ggml_time_init();
+    llama_model * model = new llama_model;
+    int status = llama_model_load(path_model, *model, params);
+    GGML_ASSERT(status <= 0);
+    
     EBBRT_UNIMPLEMENTED();
-    return nullptr;
+    return model;
 #endif
 }
 

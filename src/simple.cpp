@@ -1,3 +1,4 @@
+#include "simple.h"
 #include "common.h"
 #include "llama.h"
 
@@ -49,25 +50,70 @@ private:
   class TcpSession : public ebbrt::TcpHandler {
   public:
     TcpSession(ebbrt::NetworkManager::TcpPcb pcb)
-      : ebbrt::TcpHandler(std::move(pcb)) {
-      buf_ = nullptr;
-    }
+      : ebbrt::TcpHandler(std::move(pcb)) {}
     void Close() {}
     void Abort() {}
     
     void Receive(std::unique_ptr<MutIOBuf> b) {
       kassert(b->Length() != 0);
 
-      if(buf_) {
-	buf_->PrependChain(std::move(b));	  
+      if(GLLMbuf) {
+	GLLMbuf->PrependChain(std::move(b));	  
       } else {
-	buf_ = std::move(b);
+	GLLMbuf = std::move(b);
       }
-      ebbrt::kprintf_force("len=%u\n", buf_->ComputeChainDataLength());
+      //ebbrt::kprintf_force("GLLMbuf len=%u\n", GLLMbuf->ComputeChainDataLength());
     }
           
   private:
-    std::unique_ptr<ebbrt::MutIOBuf> buf_;
+    ebbrt::NetworkManager::TcpPcb pcb_;
+  };
+
+  NetworkManager::ListeningTcpPcb listening_pcb_;
+};
+
+class RunCommand : public StaticSharedEbb<RunCommand>, public CacheAligned {
+public:
+  RunCommand() {}
+  void Start(uint16_t port) {
+    listening_pcb_.Bind(port, [this](NetworkManager::TcpPcb pcb) {
+      // new connection callback
+      static std::atomic<size_t> cpu_index{MCPU};
+      pcb.BindCpu(MCPU);
+      auto connection = new RunSession(std::move(pcb));
+      connection->Install();
+      ebbrt::kprintf_force("Core %u: RunCommand connection created\n", static_cast<uint32_t>(ebbrt::Cpu::GetMine()));
+    });
+  }
+  
+private:
+  class RunSession : public ebbrt::TcpHandler {
+  public:
+    RunSession(ebbrt::NetworkManager::TcpPcb pcb) : ebbrt::TcpHandler(std::move(pcb)) {}
+    void Close() {}
+    void Abort() {}
+    
+    void Receive(std::unique_ptr<MutIOBuf> b) {
+      kassert(b->Length() != 0);
+
+      std::string s(reinterpret_cast<const char*>(b->Data()));
+      ebbrt::kprintf_force("*** %s ****\n", s.c_str());
+      ebbrt::kprintf_force("GLLMbuf len=%u\n", GLLMbuf->ComputeChainDataLength());
+      
+      gpt_params params;
+
+      // total length of the sequence including the prompt
+      const int n_len = 32;
+      
+      // init LLM	
+      llama_backend_init();
+      
+      // initialize the model
+      llama_model_params model_params = llama_model_default_params();
+      llama_model * model = llama_load_model_from_file("", model_params);       
+    }
+          
+  private:
     ebbrt::NetworkManager::TcpPcb pcb_;
   };
 
@@ -84,10 +130,15 @@ void AppMain() {
       auto mc = ebbrt::EbbRef<ebbrt::TcpCommand>(id);
       mc->Start(PORT);
       ebbrt::kprintf_force("TcpCommand server listening on port %d\n", PORT);
+
+      auto rid = ebbrt::ebb_allocator->AllocateLocal();
+      auto rmc = ebbrt::EbbRef<ebbrt::RunCommand>(rid);
+      rmc->Start(PORT+1);
+      ebbrt::kprintf_force("RunCommand server listening on port %d\n", PORT+1);
     }, MCPU);
 }
 /*int main(int argc, char ** argv) {
-    gpt_params params;
+  gpt_params params;
 
     if (argc == 1 || argv[1][0] == '-') {
         printf("usage: %s MODEL_PATH [PROMPT]\n" , argv[0]);
