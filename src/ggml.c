@@ -19484,7 +19484,7 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
 
     const int   n_threads   = state->shared->n_threads;
 
-    set_numa_thread_affinity(state->ith);
+    //set_numa_thread_affinity(state->ith);
 
     int node_n     = -1;
     int task_phase = GGML_TASK_TYPE_FINALIZE;
@@ -19885,7 +19885,7 @@ enum ggml_status ggml_graph_compute(struct ggml_cgraph * cgraph, struct ggml_cpl
     enum ggml_status compute_status = workers[0].ec;
 
     // don't leave affinity set on the main thread
-    clear_numa_thread_affinity();
+    //clear_numa_thread_affinity();
 
 #ifndef _EBBRT_
     // join or kill thread pool
@@ -22197,8 +22197,6 @@ struct gguf_context * gguf_init_from_file(const char * fname, struct gguf_init_p
 
     return ctx;
 #else
-
-    return nullptr
 #endif
 }
 
