@@ -26,10 +26,14 @@ add_executable(simple.elf src/ggml.c src/llama.cpp src/common/common.cpp src/com
 add_custom_command(TARGET simple.elf POST_BUILD 
   COMMAND objcopy -O elf32-i386 simple.elf simple.elf32)
 
-add_executable(benchmark-matmult.elf src/ggml.c src/llama.cpp src/common/common.cpp src/common/sampling.cpp src/common/grammar-parser.cpp src/common/build-info.cpp src/common/json-schema-to-grammar.cpp src/sgemm.cpp src/ggml-alloc.c src/ggml-backend.c src/ggml-quants.c src/unicode.cpp src/unicode-data.cpp src/benchmark-matmult.cpp)
+add_executable(benchmark-matmult.elf src/ggml.c src/ggml-test.cpp src/llama.cpp src/common/common.cpp src/common/sampling.cpp src/common/grammar-parser.cpp src/common/build-info.cpp src/common/json-schema-to-grammar.cpp src/sgemm.cpp src/ggml-alloc.c src/ggml-backend.c src/ggml-quants.c src/unicode.cpp src/unicode-data.cpp src/benchmark-matmult.cpp)
 add_custom_command(TARGET benchmark-matmult.elf POST_BUILD 
   COMMAND objcopy -O elf32-i386 benchmark-matmult.elf benchmark-matmult.elf32)
 
-add_executable(simple-ctx.elf src/ggml.c src/sgemm.cpp src/ggml-alloc.c src/ggml-backend.c src/ggml-quants.c src/unicode.cpp src/unicode-data.cpp src/simple-ctx.cpp)
+add_executable(simple-ctx.elf src/ggml.c src/ggml-test.cpp src/sgemm.cpp src/ggml-alloc.c src/ggml-backend.c src/ggml-quants.c src/unicode.cpp src/unicode-data.cpp src/simple-ctx.cpp)
 add_custom_command(TARGET simple-ctx.elf POST_BUILD 
   COMMAND objcopy -O elf32-i386 simple-ctx.elf simple-ctx.elf32)
+
+add_executable(custom.elf src/ggml.c src/ggml-test.cpp src/sgemm.cpp src/ggml-alloc.c src/ggml-backend.c src/ggml-quants.c src/unicode.cpp src/unicode-data.cpp src/custom.cpp)
+add_custom_command(TARGET custom.elf POST_BUILD 
+  COMMAND objcopy -O elf32-i386 custom.elf custom.elf32)

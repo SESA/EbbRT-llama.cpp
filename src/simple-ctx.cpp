@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include <ebbrt/SpinBarrier.h>
 #include <ebbrt/Debug.h>
 #include <ebbrt/native/Cpu.h>
 #include <ebbrt/native/Clock.h>
@@ -128,9 +129,9 @@ struct ggml_cgraph * build_graph(const simple_model& model) {
 // compute with backend
 struct ggml_tensor * compute(const simple_model & model) {
     struct ggml_cgraph * gf = build_graph(model);
-
-    int n_threads = 1; // number of threads to perform some operations with multi-threading
-
+    
+    //int n_threads = static_cast<int>(ebbrt::Cpu::Count());; // number of threads to perform some operations with multi-threading
+    int n_threads = 2;
     ggml_graph_compute_with_ctx(model.ctx, gf, n_threads);
 
     // in this case, the output tensor is the last one in the graph
@@ -146,11 +147,8 @@ void AppMain(void) {
       [ncores, i, &p] () mutable {
 	// disables turbo boost, thermal control circuit
 	ebbrt::msr::Write(IA32_MISC_ENABLE, 0x850089);
-	//ebbrt::msr::Write(IA32_MISC_ENABLE, 0x4000850081);
 	
         // same p state as Linux with performance governor
-	//100001800
-	//ebbrt::msr::Write(IA32_PERF_CTL, 0x1800);
 	ebbrt::msr::Write(IA32_PERF_CTL, 0x100001800);
 
 	uint64_t ii, jj, sum=0, sum2=0;
@@ -171,48 +169,57 @@ void AppMain(void) {
     f.Block();
   }
 
-  uint32_t mcpu=1;
-  ebbrt::event_manager->SpawnRemote(
-      [] () mutable {
-	uint32_t mcore = static_cast<uint32_t>(ebbrt::Cpu::GetMine());
-	ebbrt::kprintf_force("simple-ctx core %u\n", mcore);
-	for (int t = 0; t < 10; t++) {
-	  uint64_t tsc_start = rdtscp();
-	  for (int i = 0; i < 1000000; i++) {
-	    // initialize data of matrices to perform matrix multiplication
-	    const int rows_A = 4, cols_A = 2;
+  size_t nt = static_cast<size_t>(ebbrt::Cpu::Count()); 
+  size_t mainCPU = ebbrt::Cpu::GetMine();
+  ebbrt::EventManager::EventContext context;
+  std::atomic<size_t> count(0);
+  static ebbrt::SpinBarrier bar(nt);  
+  for (int i = 0; i < static_cast<int>(nt); i++) {
+    ebbrt::event_manager->SpawnRemote([&context, &count, i, nt, mainCPU]() {
+      ebbrt::kprintf("AppMain SpawnRemote %d\n", static_cast<int>(ebbrt::Cpu::GetMine()));
+      count ++;
+      bar.Wait();
+      while(count < nt);
+      if (ebbrt::Cpu::GetMine() == mainCPU)
+	ebbrt::event_manager->ActivateContext(std::move(context));
+    }, i);
+  }    
+  ebbrt::event_manager->SaveContext(context);  
+  
+  uint32_t mcore = static_cast<uint32_t>(ebbrt::Cpu::GetMine());
+  ebbrt::kprintf_force("simple-ctx core %u\n", mcore);
+  for (int t = 0; t < 2; t++) {
+    uint64_t tsc_start = rdtscp();
+    for (int i = 0; i < 1; i++) {
+      // initialize data of matrices to perform matrix multiplication
+      const int rows_A = 4, cols_A = 2;
     
-	    float matrix_A[rows_A * cols_A] = {
-	      2, 8,
-	      5, 1,
-	      4, 2,
-	      8, 6
-	    };
+      float matrix_A[rows_A * cols_A] = {
+	2, 8,
+	5, 1,
+	4, 2,
+	8, 6
+      };
     
-	    const int rows_B = 3, cols_B = 2;
-	    /* Transpose([
-	       10, 9, 5,
-	       5, 9, 4
-	       ]) 2 rows, 3 cols */
-	    float matrix_B[rows_B * cols_B] = {
-	      10, 5,
-	      9, 9,
-	      5, 4
-	    };
+      const int rows_B = 3, cols_B = 2;
+      float matrix_B[rows_B * cols_B] = {
+	10, 5,
+	9, 9,
+	5, 4
+      };
     
-	    simple_model model;
-	    load_model(model, matrix_A, matrix_B, rows_A, cols_A, rows_B, cols_B);
+      simple_model model;
+      load_model(model, matrix_A, matrix_B, rows_A, cols_A, rows_B, cols_B);
     
-	    // perform computation in cpu
-	    volatile struct ggml_tensor * result = compute(model);             
+      // perform computation in cpu
+      volatile struct ggml_tensor * result = compute(model);             
 	    
-	    // free memory
-	    ggml_free(model.ctx);
-	  }
-	  uint64_t tsc_stop = rdtscp();
-	  uint64_t tsc_diff = tsc_stop - tsc_start;
-	  float tdiff = (tsc_diff/(float)TIME_CONVERSION_khz)/1000000.0;
-	  ebbrt::kprintf("TSC: %.3lf seconds\n", tdiff);
-	}
-      }, mcpu);
+      // free memory
+      ggml_free(model.ctx);
+    }
+    uint64_t tsc_stop = rdtscp();
+    uint64_t tsc_diff = tsc_stop - tsc_start;
+    float tdiff = (tsc_diff/(float)TIME_CONVERSION_khz)/1000000.0;
+    ebbrt::kprintf("TSC: %.3lf seconds\n", tdiff);
+  }	  
 }

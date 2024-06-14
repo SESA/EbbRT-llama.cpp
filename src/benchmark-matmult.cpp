@@ -17,6 +17,7 @@
 #include <algorithm>
 
 #ifdef _EBBRT_
+#include <ebbrt/SpinBarrier.h>
 #include <ebbrt/Debug.h>
 #include <ebbrt/native/Cpu.h>
 #include <ebbrt/native/Clock.h>
@@ -132,13 +133,32 @@ void AppMain() {
     f.Block();
   }
   
+  size_t nt = static_cast<size_t>(ebbrt::Cpu::Count()); 
+  size_t mainCPU = ebbrt::Cpu::GetMine();
+  ebbrt::EventManager::EventContext context;
+  std::atomic<size_t> count(0);
+  static ebbrt::SpinBarrier bar(nt);  
+  for (int i = 0; i < static_cast<int>(nt); i++) {
+    ebbrt::event_manager->SpawnRemote([&context, &count, i, nt, mainCPU]() {
+      ebbrt::kprintf("AppMain SpawnRemote %d\n", static_cast<int>(ebbrt::Cpu::GetMine()));
+      count ++;
+      bar.Wait();
+      while(count < nt);
+      if (ebbrt::Cpu::GetMine() == mainCPU)
+	ebbrt::event_manager->ActivateContext(std::move(context));
+    }, i);
+  }    
+  ebbrt::event_manager->SaveContext(context);  
+
+  
   uint32_t mcore = static_cast<uint32_t>(ebbrt::Cpu::GetMine());
   ebbrt::kprintf_force("AppMain() Core %u\n", mcore);
+  
   struct benchmark_params_struct benchmark_params;
-  benchmark_params.n_threads = 1;
-  benchmark_params.n_iterations = 10;
+  benchmark_params.n_threads = 2; //static_cast<int32_t>(ebbrt::Cpu::Count());
+  benchmark_params.n_iterations = 100;
 
-  ebbrt::kprintf("Starting Test\n");
+  ebbrt::kprintf("Starting Test n_threads=%d n_iterations=%d\n", benchmark_params.n_threads, benchmark_params.n_iterations);
 
   // create the ggml context
   struct ggml_context * ctx;
@@ -164,7 +184,7 @@ void AppMain() {
   struct ggml_init_params params = {
     ctx_size,
     NULL,
-    0
+    false,
   };
   
   ctx = ggml_init(params);
@@ -175,20 +195,16 @@ void AppMain() {
 
 
   ebbrt::kprintf("Creating new tensors\n");
-  // printf("Creating new tensor m1\n");
   struct ggml_tensor * m11 = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, sizex, sizey);
   ggml_set_f32(m11, 1.0f);
   
-  // printf("Creating new tensor m1\n");
   struct ggml_tensor * m12 = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, sizex, sizey);
   ggml_set_f32(m12, 1.5f);
   
-  // printf("Creating new tensor m2\n");
   struct ggml_tensor * m2 = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, sizex, sizez);
   ggml_set_f32(m2, 2.0f);
   
   printf("\n------ Test 1 - Matrix Mult via F32 code\n");
-  // printf("Creating new tensor m11xm2\n");
   struct ggml_tensor * m11xm2 = ggml_mul_mat(ctx, m11, m2);
   
   // printf("Creating compute graph\n");
@@ -208,7 +224,7 @@ void AppMain() {
   
   ebbrt::kprintf("\n------ Test 2 - Matrix Mult via %s code\n", ggml_type_name(qtype));
   
-  int32_t nelements = sizex*sizey;
+  /*int32_t nelements = sizex*sizey;
   
   // Set up a the benchmark matrices
   // printf("Creating new tensor q11 & Running quantize\n");
@@ -248,33 +264,22 @@ void AppMain() {
   float sum_of_F32_reference = tensor_sum_elements(gf->nodes[0]);
   
   ebbrt::kprintf("Iteration;NThreads; SizeX; SizeY; SizeZ; Required_FLOPS; Elapsed_u_Seconds; gigaFLOPS\n");
-  ebbrt::kprintf("=====================================================================================\n");
-
+  ebbrt::kprintf("=====================================================================================\n");  
   double  gflops_sum = 0;
-  for (int i=0;i<benchmark_params.n_iterations ;i++) {
-    
+  uint64_t tsc_start = ebbrt::trace::rdtsc();
+  for (int i=0;i<benchmark_params.n_iterations ;i++) {    
     long long int start = ggml_time_us();
-    //printf("Running ggml_graph_compute\n");
-    uint64_t tsc_start = ebbrt::trace::rdtsc();
+    
     ggml_graph_compute_helper(work_buffer, gf31, benchmark_params.n_threads);
-    uint64_t tsc_stop = ebbrt::trace::rdtsc();
-    uint64_t tsc_diff = tsc_stop - tsc_start;
-    float tdiff = (tsc_diff/(float)TIME_CONVERSION_khz)/1000000.0;
-    ebbrt::kprintf("TSC: %.3lf seconds\n", tdiff);
-	
+    	
     long long int stop = ggml_time_us();
     long long int usec = stop-start;
     double gflops = (double)(flops_per_matrix)/usec/1000.0;
     gflops_sum += gflops;
-    ebbrt::kprintf("%9i;%8i;%6i;%6i;%6i;%15lli;%18lli;%10.2f\n",
-		   i,
-		   benchmark_params.n_threads,
-		   sizex, sizey, sizez, flops_per_matrix,
-		   usec,gflops);
-          
-      // Check that the matrix multiplication result is in the right ballpark
-      // We cannot use the exact value from the F32 multiplication because the quantizuation will be slightly different
-      float sum_of_Q4_result = tensor_sum_elements(gf31->nodes[0]);
+
+    // Check that the matrix multiplication result is in the right ballpark
+    // We cannot use the exact value from the F32 multiplication because the quantizuation will be slightly different
+    float sum_of_Q4_result = tensor_sum_elements(gf31->nodes[0]);
     float delta = std::abs(sum_of_Q4_result - sum_of_F32_reference);
     float allowed_delta = (sum_of_F32_reference) / 1000 / 1000; //  Let's accept an epsilon of 10^-6
   
@@ -292,7 +297,13 @@ void AppMain() {
     // Running a different graph computation to make sure we override the CPU cache lines
     ggml_graph_compute_helper(work_buffer, gf32, benchmark_params.n_threads);
   }
+  uint64_t tsc_stop = ebbrt::trace::rdtsc();
+  uint64_t tsc_diff = tsc_stop - tsc_start;
+  float tdiff = (tsc_diff/(float)TIME_CONVERSION_khz)/1000000.0;
+  ebbrt::kprintf("TSC: %.3lf seconds\n", tdiff);
+
   ebbrt::kprintf("\n");
   ebbrt::kprintf("Average%78.2f\n",gflops_sum/((double)benchmark_params.n_iterations));
   ebbrt::kprintf("=====================================================================================\n");
+  */
 }
