@@ -16,6 +16,22 @@
 #include <iterator>
 #include <algorithm>
 
+#ifdef _EBBRT_
+#include <ebbrt/SpinBarrier.h>
+#include <ebbrt/Debug.h>
+#include <ebbrt/native/Cpu.h>
+#include <ebbrt/native/Clock.h>
+#include <ebbrt/EventManager.h>
+#include <ebbrt/SharedIOBufRef.h>
+#include <ebbrt/StaticIOBuf.h>
+#include <ebbrt/UniqueIOBuf.h>
+#include <ebbrt/StaticSharedEbb.h>
+#include <ebbrt/AtomicUniquePtr.h>
+#include <ebbrt/CacheAligned.h>
+#include <ebbrt/SpinLock.h>
+#include <ebbrt/Future.h>
+#endif
+
 #if defined(_MSC_VER)
 #pragma warning(disable: 4244 4267) // possible loss of data
 #endif
@@ -44,11 +60,19 @@ static float tensor_sum_elements(const ggml_tensor * tensor) {
 }
 
 static void tensor_dump(const ggml_tensor * tensor, const char * name) {
+#ifdef _EBBRT_
+  ebbrt::kprintf("%15s: type = %i (%5s) ne = %5" PRIi64 " x %5" PRIi64 " x %5" PRIi64 ", nb = (%5zi, %5zi, %5zi) - ", name,
+	 tensor->type, ggml_type_name(tensor->type),
+	 tensor->ne[0], tensor->ne[1], tensor->ne[2], tensor->nb[0], tensor->nb[1], tensor->nb[2]);
+  float sum = tensor_sum_elements(tensor);
+  ebbrt::kprintf("Sum of tensor %s is %6.2f\n", name, sum);
+#else
     printf("%15s: type = %i (%5s) ne = %5" PRIi64 " x %5" PRIi64 " x %5" PRIi64 ", nb = (%5zi, %5zi, %5zi) - ", name,
         tensor->type, ggml_type_name(tensor->type),
         tensor->ne[0], tensor->ne[1], tensor->ne[2], tensor->nb[0], tensor->nb[1], tensor->nb[2]);
     float sum = tensor_sum_elements(tensor);
     printf("Sum of tensor %s is %6.2f\n", name, sum);
+#endif
 }
 
 #define TENSOR_DUMP(tensor) tensor_dump(tensor, #tensor)
@@ -68,6 +92,78 @@ static void print_usage(int /*argc*/, char ** argv, struct benchmark_params_stru
     fprintf(stderr, "\n");
 }
 
+#ifdef _EBBRT_
+void AppMain(void) {
+  struct benchmark_params_struct benchmark_params;
+  benchmark_params.n_threads = 4;
+  
+  ebbrt::kprintf("Starting Test\n");
+  // create the ggml context
+  struct ggml_context * ctx;
+  const int sizey = 4096;
+  const int sizex = 11008;
+  const int sizez = 128;
+
+  const ggml_type qtype = GGML_TYPE_Q4_1;
+  
+  size_t ctx_size = 0;
+  ctx_size += ggml_row_size(GGML_TYPE_F32, sizex*sizey);
+  ctx_size += ggml_row_size(GGML_TYPE_F32, sizex*sizey);
+  ctx_size += ggml_row_size(GGML_TYPE_F32, sizex*sizez);
+  ctx_size += ggml_row_size(qtype,         sizex*sizey);
+  ctx_size += ggml_row_size(qtype,         sizex*sizey);
+  ctx_size += ggml_row_size(GGML_TYPE_F32, sizex*sizey); // BLAS
+  ctx_size += ggml_row_size(GGML_TYPE_F32, sizex*sizey); // BLAS
+  ctx_size += 1024*1024*16;
+  
+  printf("Allocating Memory of size %ld bytes, %ld MB\n", ctx_size, (ctx_size/1024/1024));
+  
+  struct ggml_init_params params = {
+    /*.mem_size   =*/ ctx_size,
+    /*.mem_buffer =*/ NULL,
+    /* no_alloc   =*/ 0
+  };
+  
+  ctx = ggml_init(params);
+  if (!ctx) {
+    ebbrt::kprintf("%s: ggml_init() failed\n", __func__);
+    return;
+  }
+
+
+  ebbrt::kprintf("Creating new tensors\n");
+  // printf("Creating new tensor m1\n");
+  struct ggml_tensor * m11 = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, sizex, sizey);
+  ggml_set_f32(m11, 1.0f);
+
+  // printf("Creating new tensor m1\n");
+  struct ggml_tensor * m12 = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, sizex, sizey);
+  ggml_set_f32(m12, 1.5f);
+  
+  // printf("Creating new tensor m2\n");
+  struct ggml_tensor * m2 = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, sizex, sizez);
+  ggml_set_f32(m2, 2.0f);
+  
+  ebbrt::kprintf("\n------ Test 1 - Matrix Mult via F32 code\n");
+  struct ggml_tensor * m11xm2 = ggml_mul_mat(ctx, m11, m2);
+  struct ggml_cgraph * gf = ggml_new_graph(ctx);
+  ggml_build_forward_expand(gf, m11xm2);
+  
+  ebbrt::kprintf("n_threads=%i\n", benchmark_params.n_threads);
+  
+  TENSOR_DUMP(m11);
+  TENSOR_DUMP(m2);
+  
+  std::vector<uint8_t> work_buffer;
+  
+  ggml_graph_compute_helper(work_buffer, gf, benchmark_params.n_threads);
+  
+  TENSOR_DUMP(gf->nodes[0]);
+
+    
+  return;
+}
+#else
 int main(int argc, char ** argv)  {
     struct benchmark_params_struct benchmark_params;
 
@@ -273,3 +369,4 @@ int main(int argc, char ** argv)  {
     printf("Average%78.2f\n",gflops_sum/((double)benchmark_params.n_iterations));
     printf("=====================================================================================\n");
 }
+#endif

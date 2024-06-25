@@ -12,6 +12,11 @@
 #include <alloca.h>
 #endif
 
+#ifdef _EBBRT_
+#include <sys/time.h>
+#include <malloc.h>
+#endif
+
 #include <assert.h>
 #include <errno.h>
 #include <time.h>
@@ -126,7 +131,9 @@ typedef void * thread_ret_t;
 
 #endif
 
+#ifndef _EBBRT_
 typedef pthread_t ggml_thread_t;
+#endif
 
 #ifdef GGML_USE_CPU_HBM
 #include <hbwmalloc.h>
@@ -231,6 +238,9 @@ inline static void * ggml_aligned_malloc(size_t size) {
     int result = hbw_posix_memalign(&aligned_memory, 16, size);
 #elif GGML_USE_METAL
     int result = posix_memalign(&aligned_memory, sysconf(_SC_PAGESIZE), size);
+#elif _EBBRT_
+    aligned_memory = memalign(GGML_MEM_ALIGN, size);
+    int result = 0;
 #else
     int result = posix_memalign(&aligned_memory, GGML_MEM_ALIGN, size);
 #endif
@@ -453,15 +463,29 @@ int64_t ggml_time_us(void) {
 #else
 void ggml_time_init(void) {}
 int64_t ggml_time_ms(void) {
+#ifdef _EBBRT_
+  struct timeval tv;
+  if (gettimeofday(&tv, NULL) < 0)
+    return 0;
+  return (int64_t)tv.tv_sec*1000 + (int64_t)tv.tv_usec/1000;
+#else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (int64_t)ts.tv_sec*1000 + (int64_t)ts.tv_nsec/1000000;
+#endif
 }
 
 int64_t ggml_time_us(void) {
+#ifdef _EBBRT_
+  struct timeval tv;
+  if (gettimeofday(&tv, NULL) < 0)
+    return 0;
+  return (int64_t)tv.tv_sec*1000000 + (int64_t)tv.tv_usec;
+#else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (int64_t)ts.tv_sec*1000000 + (int64_t)ts.tv_nsec/1000;
+#endif
 }
 #endif
 
@@ -1749,7 +1773,9 @@ struct ggml_compute_state_shared {
 };
 
 struct ggml_compute_state {
+#ifndef _EBBRT_
     ggml_thread_t thrd;
+#endif
     int ith;
     struct ggml_compute_state_shared * shared;
 };
@@ -18646,6 +18672,8 @@ struct ggml_cplan ggml_graph_plan(const struct ggml_cgraph * cgraph, int n_threa
 }
 
 static thread_ret_t ggml_graph_compute_thread(void * data) {
+#ifdef _EBBRT_
+#else
     struct ggml_compute_state * state = (struct ggml_compute_state *) data;
 
     const struct ggml_cgraph * cgraph = state->shared->cgraph;
@@ -18676,11 +18704,25 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
             break;
         }
     }
-
+#endif
     return 0;
 }
 
+#ifdef _EBBRT_
+// Typedef for ggml_graph_compute_thread function
+typedef thread_ret_t (*FunctionPtr)(void *);
+//typedef void (*FunctionPtr)(void *);
+// Declare the C++ function that takes a function pointer
+extern void cppFunction(FunctionPtr ptr, void *workers, int n_threads, size_t workerSize);
+extern void eprint(char *s);
+#endif
+
 enum ggml_status ggml_graph_compute(struct ggml_cgraph * cgraph, struct ggml_cplan * cplan) {
+#ifdef _EBBRT_
+  char buffer [100];
+  snprintf(buffer, 100, "[TEST] %s", __func__);
+  eprint(buffer);
+#else
     GGML_ASSERT(cplan);
     GGML_ASSERT(cplan->n_threads > 0);
     GGML_ASSERT(cplan->work_size == 0 || cplan->work_data != NULL);
@@ -18760,6 +18802,7 @@ enum ggml_status ggml_graph_compute(struct ggml_cgraph * cgraph, struct ggml_cpl
     clear_numa_thread_affinity();
 
     return state_shared.ec;
+#endif
 }
 
 enum ggml_status ggml_graph_compute_with_ctx(struct ggml_context * ctx, struct ggml_cgraph * cgraph, int n_threads) {
