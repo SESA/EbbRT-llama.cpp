@@ -239,7 +239,8 @@ inline static void * ggml_aligned_malloc(size_t size) {
 #elif GGML_USE_METAL
     int result = posix_memalign(&aligned_memory, sysconf(_SC_PAGESIZE), size);
 #elif _EBBRT_
-    aligned_memory = memalign(GGML_MEM_ALIGN, size);
+    //aligned_memory = memalign(GGML_MEM_ALIGN, size);
+    aligned_memory = malloc(size);
     int result = 0;
 #else
     int result = posix_memalign(&aligned_memory, GGML_MEM_ALIGN, size);
@@ -2877,8 +2878,10 @@ static atomic_flag g_state_critical = ATOMIC_FLAG_INIT;
 // critical section via spin lock
 inline static void ggml_critical_section_start(void) {
     while (atomic_flag_test_and_set(&g_state_critical)) {
+#ifndef _EBBRT_
         // spin
         sched_yield();
+#endif
     }
 }
 
@@ -2918,7 +2921,9 @@ static void ggml_barrier(struct ggml_compute_state_shared * shared) {
                 _mm_pause();
             #endif
             }
+#ifndef _EBBRT_
             sched_yield();
+#endif
         }
     }
 }
@@ -17995,7 +18000,7 @@ static void ggml_build_forward_impl(struct ggml_cgraph * cgraph, struct ggml_ten
 }
 
 void ggml_build_forward_expand(struct ggml_cgraph * cgraph, struct ggml_tensor * tensor) {
-    ggml_build_forward_impl(cgraph, tensor, true);
+  ggml_build_forward_impl(cgraph, tensor, true);
 }
 
 void ggml_build_backward_expand(struct ggml_context * ctx, struct ggml_cgraph * gf, struct ggml_cgraph * gb, bool keep) {
@@ -18672,8 +18677,6 @@ struct ggml_cplan ggml_graph_plan(const struct ggml_cgraph * cgraph, int n_threa
 }
 
 static thread_ret_t ggml_graph_compute_thread(void * data) {
-#ifdef _EBBRT_
-#else
     struct ggml_compute_state * state = (struct ggml_compute_state *) data;
 
     const struct ggml_cgraph * cgraph = state->shared->cgraph;
@@ -18693,7 +18696,7 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
         struct ggml_tensor * node = cgraph->nodes[node_n];
 
         ggml_compute_forward(&params, node);
-
+	
         if (state->ith == 0 && cplan->abort_callback && cplan->abort_callback(cplan->abort_callback_data)) {
             state->shared->ec = GGML_STATUS_ABORTED;
         }
@@ -18704,7 +18707,6 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
             break;
         }
     }
-#endif
     return 0;
 }
 
@@ -18715,13 +18717,40 @@ typedef thread_ret_t (*FunctionPtr)(void *);
 // Declare the C++ function that takes a function pointer
 extern void cppFunction(FunctionPtr ptr, void *workers, int n_threads, size_t workerSize);
 extern void eprint(char *s);
+extern void ebbrt_ggml_graph_compute(void* ecgraph, void* ecplan);
 #endif
 
 enum ggml_status ggml_graph_compute(struct ggml_cgraph * cgraph, struct ggml_cplan * cplan) {
 #ifdef _EBBRT_
-  char buffer [100];
-  snprintf(buffer, 100, "[TEST] %s", __func__);
-  eprint(buffer);
+  
+  //ebbrt_ggml_graph_compute(cgraph, cplan);
+  int n_threads = cplan->n_threads;
+  //char buffer [100];
+  //snprintf(buffer, 100, "[TEST] %s %p %d", __func__, cgraph, n_threads);
+  //eprint(buffer);
+  
+  struct ggml_compute_state_shared state_shared = {
+    /*.cgraph                  =*/ cgraph,
+    /*.cgraph_plan             =*/ cplan,
+    /*.n_threads               =*/ n_threads,
+    /*.n_barrier               =*/ 0,
+    /*.n_barrier_passed        =*/ 0,
+    /*.abort_callback          =*/ NULL,
+    /*.abort_callback_data     =*/ NULL,
+    /*.current_chunk           =*/ 0,
+    /*.ec                      =*/ GGML_STATUS_SUCCESS,
+  };
+  struct ggml_compute_state * workers = (struct ggml_compute_state *)malloc(sizeof(struct ggml_compute_state)*n_threads);
+  for (int j = 0; j < n_threads; j++) {
+    workers[j] = (struct ggml_compute_state) {
+      .ith = j,
+      .shared = &state_shared,
+    };
+  }
+  size_t workerSize = sizeof(struct ggml_compute_state);
+  cppFunction(ggml_graph_compute_thread, workers, n_threads, workerSize);
+  
+  return state_shared.ec;
 #else
     GGML_ASSERT(cplan);
     GGML_ASSERT(cplan->n_threads > 0);
@@ -19301,6 +19330,40 @@ struct ggml_cgraph * ggml_graph_import(const char * fname, struct ggml_context *
 }
 
 void ggml_graph_print(const struct ggml_cgraph * cgraph) {
+#ifdef _EBBRT_
+  char buffer [100];
+  snprintf(buffer, 100, "=== GRAPH ===");
+  eprint(buffer);
+  snprintf(buffer, 100, "n_nodes = %d", cgraph->n_nodes);
+  eprint(buffer);
+
+  for (int i = 0; i < cgraph->n_nodes; i++) {
+        struct ggml_tensor * node = cgraph->nodes[i];
+
+        snprintf(buffer, 100, " - %3d: [ %5" PRId64 ", %5" PRId64 ", %5" PRId64 "] %16s %s",
+                i,
+                node->ne[0], node->ne[1], node->ne[2],
+                ggml_op_name(node->op), (node->flags & GGML_TENSOR_FLAG_PARAM) ? "x" : node->grad ? "g" : " ");
+	eprint(buffer);
+    }
+
+    snprintf(buffer, 100, "n_leafs = %d\n", cgraph->n_leafs);
+    eprint(buffer);
+    for (int i = 0; i < cgraph->n_leafs; i++) {
+        struct ggml_tensor * node = cgraph->leafs[i];
+
+        snprintf(buffer, 100, " - %3d: [ %5" PRId64 ", %5" PRId64 "] %8s %16s",
+                i,
+                node->ne[0], node->ne[1],
+                ggml_op_name(node->op),
+                ggml_get_name(node));
+	eprint(buffer);
+    }
+
+    snprintf(buffer, 100, "========================================");
+    eprint(buffer);
+    
+#else
     GGML_PRINT("=== GRAPH ===\n");
 
     GGML_PRINT("n_nodes = %d\n", cgraph->n_nodes);
@@ -19325,6 +19388,7 @@ void ggml_graph_print(const struct ggml_cgraph * cgraph) {
     }
 
     GGML_PRINT("========================================\n");
+#endif
 }
 
 // check if node is part of the graph
