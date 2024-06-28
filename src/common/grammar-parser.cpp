@@ -6,6 +6,10 @@
 #include <stdexcept>
 #include <exception>
 
+#ifdef _EBBRT_
+#include <ebbrt/Debug.h>
+#endif
+
 namespace grammar_parser {
     // NOTE: assumes valid utf8 (but checks for overrun)
     // copied from llama.cpp
@@ -286,7 +290,12 @@ namespace grammar_parser {
                     throw std::runtime_error(std::string("expecting an int at ") + pos);
                 }
                 const char * int_end = parse_int(pos);
+#ifndef _EBBRT_
                 int min_times = std::stoul(std::string(pos, int_end - pos));
+#else
+		int min_times = 0;
+		EBBRT_UNIMPLEMENTED();
+#endif
                 pos = parse_space(int_end, is_nested);
 
                 int max_times = -1;
@@ -299,7 +308,11 @@ namespace grammar_parser {
 
                     if (is_digit_char(*pos)) {
                         const char * int_end = parse_int(pos);
+#ifndef _EBBRT_
                         max_times = std::stoul(std::string(pos, int_end - pos));
+#else
+			max_times = 0;
+#endif
                         pos = parse_space(int_end, is_nested);
                     }
 

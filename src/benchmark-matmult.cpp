@@ -104,7 +104,7 @@ static void print_usage(int /*argc*/, char ** argv, struct benchmark_params_stru
 
 #ifdef _EBBRT_
 void AppMain(void) {
- uint32_t ncores = static_cast<uint32_t>(ebbrt::Cpu::Count());  
+  /*uint32_t ncores = static_cast<uint32_t>(ebbrt::Cpu::Count());  
   for (uint32_t i = 0; i < ncores; i++) {
     ebbrt::Promise<void> p;
     auto f = p.GetFuture();
@@ -137,10 +137,10 @@ void AppMain(void) {
 	ebbrt::event_manager->ActivateContext(std::move(context));
     }, i);
   }    
-  ebbrt::event_manager->SaveContext(context);  
+  ebbrt::event_manager->SaveContext(context);*/
   
   struct benchmark_params_struct benchmark_params;
-  benchmark_params.n_threads = 16;
+  benchmark_params.n_threads = static_cast<int>(ebbrt::Cpu::Count());
   
   // create the ggml context
   struct ggml_context * ctx;

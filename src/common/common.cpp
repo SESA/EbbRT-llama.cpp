@@ -37,7 +37,9 @@
 #include <fcntl.h>
 #include <io.h>
 #else
+#ifndef _EBBRT_
 #include <sys/ioctl.h>
+#endif
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
@@ -47,6 +49,8 @@
 #include <thread>
 #include <future>
 #endif
+
+
 
 #if defined(_MSC_VER)
 #pragma warning(disable: 4244 4267) // possible loss of data
@@ -76,7 +80,13 @@ using json = nlohmann::ordered_json;
 //
 // CPU utils
 //
-
+#ifdef _EBBRT_
+#include <ebbrt/Debug.h>
+#include <ebbrt/native/Cpu.h>
+int32_t cpu_get_num_physical_cores() {
+  return static_cast<int32_t>(ebbrt::Cpu::Count());
+}
+#else
 int32_t cpu_get_num_physical_cores() {
 #ifdef __linux__
     // enumerate the set of thread siblings, num entries is num cores
@@ -185,6 +195,7 @@ int32_t cpu_get_num_math() {
 #endif
     return cpu_get_num_physical_cores();
 }
+#endif // _EBBRT_
 
 //
 // CLI argument parsing
@@ -276,6 +287,7 @@ bool gpt_params_parse(int argc, char ** argv, gpt_params & params) {
 #define CHECK_ARG if (++i >= argc) { invalid_param = true; return true; }
 
 bool gpt_params_find_arg(int argc, char ** argv, const std::string & arg, gpt_params & params, int & i, bool & invalid_param) {
+#ifndef _EBBRT_
     const char split_delim = ',';
 
     llama_sampling_params & sparams = params.sparams;
@@ -1313,9 +1325,11 @@ bool gpt_params_find_arg(int argc, char ** argv, const std::string & arg, gpt_pa
     }
     // End of Parse args for logging parameters
 #endif // LOG_DISABLE_LOGS
-
+#endif // _EBBRT_
     return false;
 }
+
+
 
 #ifdef __GNUC__
 #ifdef __MINGW32__
@@ -1660,7 +1674,9 @@ std::string gpt_params_get_system_info(const gpt_params & params) {
     if (params.n_threads_batch != -1) {
         os << " (n_threads_batch = " << params.n_threads_batch << ")";
     }
+#ifndef _EBBRT_
     os << " / " << std::thread::hardware_concurrency() << " | " << llama_print_system_info();
+#endif
 
     return os.str();
 }
@@ -2783,7 +2799,11 @@ static llama_control_vector_data llama_control_vector_load_one(const llama_contr
             size_t dotpos = name.find('.');
             if (dotpos != std::string::npos && name.substr(0, dotpos) == "direction") {
                 try {
-                    uint32_t layer = std::stoi(name.substr(dotpos + 1));
+#ifndef _EBBRT_
+		    uint32_t layer = std::stoi(name.substr(dotpos + 1));
+#else
+		    uint32_t layer = atoi(name.substr(dotpos + 1).c_str());
+#endif
                     if (layer == 0) {
                         fprintf(stderr, "%s: direction tensor invalid in %s\n", __func__, load_info.fname.c_str());
                         ggml_free(meta_ctx);
@@ -3110,7 +3130,9 @@ void yaml_dump_non_result_info(FILE * stream, const gpt_params & params, const l
     yaml_dump_vector_float(stream, "tensor_split", tensor_split_vector);
 
     fprintf(stream, "tfs: %f # default: 1.0\n", sparams.tfs_z);
+#ifndef _EBBRT_
     fprintf(stream, "threads: %d # default: %u\n", params.n_threads, std::thread::hardware_concurrency());
+#endif
     fprintf(stream, "top_k: %d # default: 40\n", sparams.top_k);
     fprintf(stream, "top_p: %f # default: 0.95\n", sparams.top_p);
     fprintf(stream, "min_p: %f # default: 0.0\n", sparams.min_p);
@@ -3118,3 +3140,5 @@ void yaml_dump_non_result_info(FILE * stream, const gpt_params & params, const l
     fprintf(stream, "verbose_prompt: %s # default: false\n", params.verbose_prompt ? "true" : "false");
     fprintf(stream, "display_prompt: %s # default: true\n", params.display_prompt ? "true" : "false");
 }
+
+
