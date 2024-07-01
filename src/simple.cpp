@@ -1,6 +1,6 @@
 #include "simple.h"
 #include "common.h"
-#include "llama.h"
+//#include "llama.h"
 
 #include <cmath>
 #include <cstdio>
@@ -31,6 +31,7 @@
 #define MCPU 1
 #define PORT 8888
 
+std::unique_ptr<ebbrt::MutIOBuf> GLLMbuf = nullptr;
 namespace ebbrt {    
 class TcpCommand : public StaticSharedEbb<TcpCommand>, public CacheAligned {
 public:
@@ -72,7 +73,7 @@ private:
   NetworkManager::ListeningTcpPcb listening_pcb_;
 };
 
-class RunCommand : public StaticSharedEbb<RunCommand>, public CacheAligned {
+  class RunCommand : public StaticSharedEbb<RunCommand>, public CacheAligned {
 public:
   RunCommand() {}
   void Start(uint16_t port) {
@@ -98,27 +99,28 @@ private:
 
       std::string s(reinterpret_cast<const char*>(b->Data()));
       ebbrt::kprintf_force("*** %s ****\n", s.c_str());
-      ebbrt::kprintf_force("GLLMbuf len=%u\n", GLLMbuf->ComputeChainDataLength());
-      
-      gpt_params params;
+      //ebbrt::kprintf_force("GLLMbuf len=%u\n", GLLMbuf->ComputeChainDataLength());
+
+      gpt_params params;    
+      params.prompt = "Hello my name is";
+      params.n_predict = 32;
 
       // total length of the sequence including the prompt
-      const int n_len = 32;
+      const int n_predict = params.n_predict;
       
-      // init LLM	
+      // init LLM      
       llama_backend_init();
-      
-      // initialize the model
-      llama_model_params model_params = llama_model_default_params();
-      llama_model * model = llama_load_model_from_file("", model_params);       
+      llama_model_params model_params = llama_model_params_from_gpt_params(params);      
+      llama_model * model = llama_load_model_from_file("", model_params);
+    
     }
-          
+    
   private:
     ebbrt::NetworkManager::TcpPcb pcb_;
   };
 
   NetworkManager::ListeningTcpPcb listening_pcb_;
-};
+  };
 }
 
 void AppMain() {
@@ -135,30 +137,25 @@ void AppMain() {
       auto rmc = ebbrt::EbbRef<ebbrt::RunCommand>(rid);
       rmc->Start(PORT+1);
       ebbrt::kprintf_force("RunCommand server listening on port %d\n", PORT+1);
+      
     }, MCPU);
 }
-/*int main(int argc, char ** argv) {
-  gpt_params params;
 
-    if (argc == 1 || argv[1][0] == '-') {
-        printf("usage: %s MODEL_PATH [PROMPT]\n" , argv[0]);
-        return 1 ;
-    }
 
-    if (argc >= 2) {
-        params.model = argv[1];
-    }
+/*
+int main(int argc, char ** argv) {
+    gpt_params params;
 
-    if (argc >= 3) {
-        params.prompt = argv[2];
-    }
+    params.prompt = "Hello my name is";
+    params.n_predict = 32;
 
-    if (params.prompt.empty()) {
-        params.prompt = "Hello my name is";
+    if (!gpt_params_parse(argc, argv, params)) {
+        print_usage(argc, argv, params);
+        return 1;
     }
 
     // total length of the sequence including the prompt
-    const int n_len = 32;
+    const int n_predict = params.n_predict;
 
     // init LLM
 
@@ -167,9 +164,7 @@ void AppMain() {
 
     // initialize the model
 
-    llama_model_params model_params = llama_model_default_params();
-
-    // model_params.n_gpu_layers = 99; // offload all layers to the GPU
+    llama_model_params model_params = llama_model_params_from_gpt_params(params);
 
     llama_model * model = llama_load_model_from_file(params.model.c_str(), model_params);
 
@@ -180,12 +175,7 @@ void AppMain() {
 
     // initialize the context
 
-    llama_context_params ctx_params = llama_context_default_params();
-
-    ctx_params.seed  = 1234;
-    ctx_params.n_ctx = 2048;
-    ctx_params.n_threads = params.n_threads;
-    ctx_params.n_threads_batch = params.n_threads_batch == -1 ? params.n_threads : params.n_threads_batch;
+    llama_context_params ctx_params = llama_context_params_from_gpt_params(params);
 
     llama_context * ctx = llama_new_context_with_model(model, ctx_params);
 
@@ -200,14 +190,14 @@ void AppMain() {
     tokens_list = ::llama_tokenize(ctx, params.prompt, true);
 
     const int n_ctx    = llama_n_ctx(ctx);
-    const int n_kv_req = tokens_list.size() + (n_len - tokens_list.size());
+    const int n_kv_req = tokens_list.size() + (n_predict - tokens_list.size());
 
-    LOG_TEE("\n%s: n_len = %d, n_ctx = %d, n_kv_req = %d\n", __func__, n_len, n_ctx, n_kv_req);
+    LOG_TEE("\n%s: n_predict = %d, n_ctx = %d, n_kv_req = %d\n", __func__, n_predict, n_ctx, n_kv_req);
 
     // make sure the KV cache is big enough to hold all the prompt and generated tokens
     if (n_kv_req > n_ctx) {
         LOG_TEE("%s: error: n_kv_req > n_ctx, the required KV cache size is not big enough\n", __func__);
-        LOG_TEE("%s:        either reduce n_len or increase n_ctx\n", __func__);
+        LOG_TEE("%s:        either reduce n_predict or increase n_ctx\n", __func__);
         return 1;
     }
 
@@ -246,7 +236,7 @@ void AppMain() {
 
     const auto t_main_start = ggml_time_us();
 
-    while (n_cur <= n_len) {
+    while (n_cur <= n_predict) {
         // sample the next token
         {
             auto   n_vocab = llama_n_vocab(model);
@@ -265,7 +255,7 @@ void AppMain() {
             const llama_token new_token_id = llama_sample_token_greedy(ctx, &candidates_p);
 
             // is it an end of generation?
-            if (llama_token_is_eog(model, new_token_id) || n_cur == n_len) {
+            if (llama_token_is_eog(model, new_token_id) || n_cur == n_predict) {
                 LOG_TEE("\n");
 
                 break;
@@ -311,4 +301,5 @@ void AppMain() {
     llama_backend_free();
 
     return 0;
-    }*/
+}
+*/
