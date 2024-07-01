@@ -31,6 +31,7 @@
 #define MCPU 1
 #define PORT 8888
 
+std::unique_ptr<ebbrt::MutIOBuf> GLLMbuf = nullptr;
 namespace ebbrt {    
 class TcpCommand : public StaticSharedEbb<TcpCommand>, public CacheAligned {
 public:
@@ -72,7 +73,7 @@ private:
   NetworkManager::ListeningTcpPcb listening_pcb_;
 };
 
-class RunCommand : public StaticSharedEbb<RunCommand>, public CacheAligned {
+  class RunCommand : public StaticSharedEbb<RunCommand>, public CacheAligned {
 public:
   RunCommand() {}
   void Start(uint16_t port) {
@@ -98,7 +99,7 @@ private:
 
       std::string s(reinterpret_cast<const char*>(b->Data()));
       ebbrt::kprintf_force("*** %s ****\n", s.c_str());
-      ebbrt::kprintf_force("GLLMbuf len=%u\n", GLLMbuf->ComputeChainDataLength());
+      //ebbrt::kprintf_force("GLLMbuf len=%u\n", GLLMbuf->ComputeChainDataLength());
 
       gpt_params params;    
       params.prompt = "Hello my name is";
@@ -119,7 +120,7 @@ private:
   };
 
   NetworkManager::ListeningTcpPcb listening_pcb_;
-};
+  };
 }
 
 void AppMain() {
@@ -136,6 +137,7 @@ void AppMain() {
       auto rmc = ebbrt::EbbRef<ebbrt::RunCommand>(rid);
       rmc->Start(PORT+1);
       ebbrt::kprintf_force("RunCommand server listening on port %d\n", PORT+1);
+      
     }, MCPU);
 }
 

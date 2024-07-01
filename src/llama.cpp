@@ -91,8 +91,18 @@
 #include <unordered_map>
 
 #ifdef _EBBRT_
+#include "simple.h"
 #include <ebbrt/Debug.h>
 #define PATH_MAX        4096
+
+static bool egguf_fread_el(unsigned char * file, void * dst, size_t size, size_t * offset) {
+  memcpy(dst, file, size);
+  //const size_t n = fread(dst, 1, size, file);
+  *offset += size;
+  //file += size;
+  return true;
+  //return n == size;
+}
 #endif
 
 #if defined(_MSC_VER)
@@ -3372,6 +3382,25 @@ struct llama_model_loader {
     LLM_KV      llm_kv    = LLM_KV(LLM_ARCH_UNKNOWN);
 
     llama_model_loader(const std::string & fname, bool use_mmap, bool check_tensors, const struct llama_model_kv_override * param_overrides_p) {
+      ebbrt::kprintf_force("GLLMbuf len=%u\n", GLLMbuf->ComputeChainDataLength());
+      // offset from start of file
+      size_t offset = 0;
+      
+      char magic[4];
+      auto mdata = GLLMbuf->MutData();
+	
+      // check the magic before making allocations
+      egguf_fread_el(mdata, &magic, sizeof(magic), &offset);
+      
+      for (uint32_t i = 0; i < sizeof(magic); i++) {
+	ebbrt::kprintf("magic[%d] = %c\n", i, magic[i]);
+	//if (magic[i] != GGUF_MAGIC[i]) {
+	//  fprintf(stderr, "%s: invalid magic characters '%c%c%c%c'\n", __func__, magic[0], magic[1], magic[2], magic[3]);
+	//}
+      }
+
+    
+#if 0
         int trace = 0;
         if (getenv("LLAMA_TRACE")) {
             trace = atoi(getenv("LLAMA_TRACE"));
@@ -3393,6 +3422,7 @@ struct llama_model_loader {
         if (!meta) {
             throw std::runtime_error(format("%s: failed to load model from %s\n", __func__, fname.c_str()));
         }
+	
 
         get_key(llm_kv(LLM_KV_GENERAL_ARCHITECTURE), arch_name, false);
         llm_kv = LLM_KV(llm_arch_from_string(arch_name));
@@ -3586,15 +3616,18 @@ struct llama_model_loader {
 
         this->use_mmap = use_mmap;
         this->check_tensors = check_tensors;
+#endif
     }
 
     ~llama_model_loader() {
+#if 0
         if (meta) {
             gguf_free(meta);
         }
         for (auto * ctx : contexts) {
             ggml_free(ctx);
         }
+#endif
     }
 
     template<typename T>

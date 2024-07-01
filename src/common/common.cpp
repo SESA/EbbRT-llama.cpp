@@ -86,6 +86,10 @@ using json = nlohmann::ordered_json;
 int32_t cpu_get_num_physical_cores() {
   return static_cast<int32_t>(ebbrt::Cpu::Count());
 }
+
+int32_t cpu_get_num_math() {
+  return cpu_get_num_physical_cores();
+}
 #else
 int32_t cpu_get_num_physical_cores() {
 #ifdef __linux__

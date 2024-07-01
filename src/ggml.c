@@ -20792,6 +20792,8 @@ struct gguf_context * gguf_init_empty(void) {
 }
 
 struct gguf_context * gguf_init_from_file(const char * fname, struct gguf_init_params params) {
+#ifdef _EBBRT_
+#else
     FILE * file = ggml_fopen(fname, "rb");
     if (!file) {
         return NULL;
@@ -21125,6 +21127,7 @@ struct gguf_context * gguf_init_from_file(const char * fname, struct gguf_init_p
     fclose(file);
 
     return ctx;
+#endif
 }
 
 void gguf_free(struct gguf_context * ctx) {

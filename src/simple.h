@@ -7,6 +7,6 @@
 #include <ebbrt/StaticSharedEbb.h>
 #include <ebbrt/AtomicUniquePtr.h>
 
-std::unique_ptr<ebbrt::MutIOBuf> GLLMbuf{nullptr};
+extern std::unique_ptr<ebbrt::MutIOBuf> GLLMbuf;
 
 #endif //_SIMPLE_H_
