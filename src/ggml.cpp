@@ -13,8 +13,12 @@
 typedef void * thread_ret_t;
 typedef thread_ret_t (*FunctionPtr)(void *);
 //typedef void (*FunctionPtr)(void*);
+extern "C" void eassert(char* s, int line, bool b) {
+  ebbrt::kprintf("%s: %d\n", s, line);
+  kassert(b);
+}
 extern "C" void eprint(char *s) {
-  ebbrt::kprintf("%s\n", s);
+  ebbrt::kprintf("%s", s);
 }
 
 struct ggml_compute_state_shared {

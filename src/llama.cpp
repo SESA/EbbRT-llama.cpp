@@ -86,7 +86,9 @@
 #include <regex>
 #include <set>
 #include <sstream>
+#ifndef _EBBRT_
 #include <thread>
+#endif
 #include <type_traits>
 #include <unordered_map>
 
@@ -94,15 +96,6 @@
 #include "simple.h"
 #include <ebbrt/Debug.h>
 #define PATH_MAX        4096
-
-static bool egguf_fread_el(unsigned char * file, void * dst, size_t size, size_t * offset) {
-  memcpy(dst, file, size);
-  //const size_t n = fread(dst, 1, size, file);
-  *offset += size;
-  //file += size;
-  return true;
-  //return n == size;
-}
 #endif
 
 #if defined(_MSC_VER)
@@ -1602,7 +1595,11 @@ struct llama_mmap {
     void unmap_fragment(size_t first, size_t last) {
         // note: this function must not be called multiple times with overlapping ranges
         // otherwise, there is a risk of invalidating addresses that have been repurposed for other mappings
-        int page_size = sysconf(_SC_PAGESIZE);
+#ifdef _EBBRT_
+      int page_size = 0;
+#else
+      int page_size = sysconf(_SC_PAGESIZE);
+#endif
         align_range(&first, &last, page_size);
         size_t len = last - first;
 
@@ -1776,7 +1773,11 @@ struct llama_mlock {
     static constexpr bool SUPPORTED = true;
 
     static size_t lock_granularity() {
-        return (size_t) sysconf(_SC_PAGESIZE);
+#ifdef _EBBRT_
+      return 0;
+#else
+      return (size_t) sysconf(_SC_PAGESIZE);
+#endif
     }
 
     #ifdef __APPLE__
@@ -3381,25 +3382,32 @@ struct llama_model_loader {
     std::string arch_name;
     LLM_KV      llm_kv    = LLM_KV(LLM_ARCH_UNKNOWN);
 
-    llama_model_loader(const std::string & fname, bool use_mmap, bool check_tensors, const struct llama_model_kv_override * param_overrides_p) {
-      ebbrt::kprintf_force("GLLMbuf len=%u\n", GLLMbuf->ComputeChainDataLength());
-      // offset from start of file
-      size_t offset = 0;
+    llama_model_loader(const std::string & fname, bool use_mmap, bool check_tensors, const struct llama_model_kv_override * param_overrides_p) {      
+      unsigned char* file = tGLLMbuf->MutData();
+      unsigned char* beginfile = file;
+
+      ebbrt::kprintf("[%s] tGLLMbuf len=%u addr:%p %p %p\n", __func__, tGLLMbuf->ComputeChainDataLength(), tGLLMbuf->MutData(), file, beginfile);
       
-      char magic[4];
-      auto mdata = GLLMbuf->MutData();
-	
-      // check the magic before making allocations
-      egguf_fread_el(mdata, &magic, sizeof(magic), &offset);
+      if (param_overrides_p != nullptr) {
+	for (const struct llama_model_kv_override *p = param_overrides_p; p->key[0] != 0; p++) {
+	  kv_overrides.insert({std::string(p->key), *p});
+	}
+      }
       
-      for (uint32_t i = 0; i < sizeof(magic); i++) {
-	ebbrt::kprintf("magic[%d] = %c\n", i, magic[i]);
-	//if (magic[i] != GGUF_MAGIC[i]) {
-	//  fprintf(stderr, "%s: invalid magic characters '%c%c%c%c'\n", __func__, magic[0], magic[1], magic[2], magic[3]);
-	//}
+      struct ggml_context * ctx = NULL;
+      struct gguf_init_params params = {
+	/*.no_alloc = */ true,
+	/*.ctx      = */ &ctx,
+      };
+
+      meta = gguf_init_from_buffer(file, params);
+      if (!meta) {
+      	throw std::runtime_error(format("%s: failed to load model from %s\n", __func__, fname.c_str()));
       }
 
-    
+      ebbrt::kprintf("[%s] FIN gguf_init_from_buffer\n", __func__);
+
+      
 #if 0
         int trace = 0;
         if (getenv("LLAMA_TRACE")) {
@@ -3426,7 +3434,7 @@ struct llama_model_loader {
 
         get_key(llm_kv(LLM_KV_GENERAL_ARCHITECTURE), arch_name, false);
         llm_kv = LLM_KV(llm_arch_from_string(arch_name));
-
+	
         files.emplace_back(new llama_file(fname.c_str(), "rb"));
         contexts.emplace_back(ctx);
 

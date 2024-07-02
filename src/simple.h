@@ -8,5 +8,6 @@
 #include <ebbrt/AtomicUniquePtr.h>
 
 extern std::unique_ptr<ebbrt::MutIOBuf> GLLMbuf;
+extern std::unique_ptr<ebbrt::MutIOBuf> tGLLMbuf;
 
 #endif //_SIMPLE_H_

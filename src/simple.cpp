@@ -32,6 +32,8 @@
 #define PORT 8888
 
 std::unique_ptr<ebbrt::MutIOBuf> GLLMbuf = nullptr;
+std::unique_ptr<ebbrt::MutIOBuf> tGLLMbuf = nullptr;
+
 namespace ebbrt {    
 class TcpCommand : public StaticSharedEbb<TcpCommand>, public CacheAligned {
 public:
@@ -98,9 +100,17 @@ private:
       kassert(b->Length() != 0);
 
       std::string s(reinterpret_cast<const char*>(b->Data()));
-      ebbrt::kprintf_force("*** %s ****\n", s.c_str());
-      //ebbrt::kprintf_force("GLLMbuf len=%u\n", GLLMbuf->ComputeChainDataLength());
-
+      //ebbrt::kprintf_force("*** %s ****\n", s.c_str());
+      ebbrt::kprintf_force("GLLMbuf len=%u chain_elements:%u\n", GLLMbuf->ComputeChainDataLength(), GLLMbuf->CountChainElements());
+      tGLLMbuf = MakeUniqueIOBuf(GLLMbuf->ComputeChainDataLength());
+      
+      auto GLLMfile = tGLLMbuf->MutData();
+      for (auto& buf_it : *GLLMbuf) {
+	memcpy(GLLMfile, buf_it.Data(), buf_it.Length());
+        GLLMfile += buf_it.Length();
+      }
+      ebbrt::kprintf_force("tGLLMbuf len=%u chain_elements:%u addr:%p\n", tGLLMbuf->ComputeChainDataLength(), tGLLMbuf->CountChainElements(), tGLLMbuf->MutData());
+      
       gpt_params params;    
       params.prompt = "Hello my name is";
       params.n_predict = 32;
@@ -125,7 +135,7 @@ private:
 
 void AppMain() {
   ebbrt::kprintf_force("AppMain()\n");
-  
+
   ebbrt::event_manager->SpawnRemote(
     [] () mutable {
       auto id = ebbrt::ebb_allocator->AllocateLocal();

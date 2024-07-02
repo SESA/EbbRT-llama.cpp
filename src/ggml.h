@@ -254,6 +254,8 @@
 
 #define GGML_PAD(x, n) (((x) + (n) - 1) & ~((n) - 1))
 
+#define GGML_KASSERT(x) kassert(x);
+
 #define GGML_ASSERT(x) \
     do { \
         if (!(x)) { \
@@ -2267,7 +2269,7 @@ extern "C" {
 
     GGML_API struct gguf_context * gguf_init_empty(void);
     GGML_API struct gguf_context * gguf_init_from_file(const char * fname, struct gguf_init_params params);
-    //GGML_API struct gguf_context * gguf_init_from_buffer(..);
+  GGML_API struct gguf_context * gguf_init_from_buffer(unsigned char *file, struct gguf_init_params params);
 
     GGML_API void gguf_free(struct gguf_context * ctx);
 
@@ -2421,6 +2423,79 @@ extern "C" {
     } ggml_type_traits_t;
 
     GGML_API ggml_type_traits_t ggml_internal_get_type_traits(enum ggml_type type);
+
+  struct gguf_str {
+    uint64_t n;  // GGUFv2
+    char * data;
+  };
+
+union gguf_value {
+    uint8_t  uint8;
+    int8_t   int8;
+    uint16_t uint16;
+    int16_t  int16;
+    uint32_t uint32;
+    int32_t  int32;
+    float    float32;
+    uint64_t uint64;
+    int64_t  int64;
+    double   float64;
+    bool     bool_;
+
+    struct gguf_str str;
+
+    struct {
+        enum gguf_type type;
+
+        uint64_t n;  // GGUFv2
+        void * data;
+    } arr;
+};
+
+struct gguf_kv {
+    struct gguf_str key;
+
+    enum  gguf_type  type;
+    union gguf_value value;
+};
+
+struct gguf_header {
+    char magic[4];
+
+    uint32_t version;
+    uint64_t n_tensors; // GGUFv2
+    uint64_t n_kv;      // GGUFv2
+};
+
+struct gguf_tensor_info {
+    struct gguf_str name;
+
+    uint32_t n_dims;
+    uint64_t ne[GGML_MAX_DIMS];
+
+    enum ggml_type type;
+
+    uint64_t offset; // offset from start of `data`, must be a multiple of `ALIGNMENT`
+
+    // for writing API
+    const void * data;
+    size_t size;
+};
+
+struct gguf_context {
+    struct gguf_header header;
+
+    struct gguf_kv          * kv;
+    struct gguf_tensor_info * infos;
+
+    size_t alignment;
+    size_t offset;    // offset of `data` from beginning of file
+    size_t size;      // size of `data` in bytes
+
+    //uint8_t * padding;
+    void * data;
+};
+
 
 #ifdef  __cplusplus
 }
