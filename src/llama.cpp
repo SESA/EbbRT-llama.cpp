@@ -123,9 +123,15 @@ LLAMA_ATTRIBUTE_FORMAT(2, 3)
 static void llama_log_internal        (ggml_log_level level, const char * format, ...);
 static void llama_log_callback_default(ggml_log_level level, const char * text, void * user_data);
 
+#ifdef _EBBRT_
+#define LLAMA_LOG_INFO ebbrt::kprintf
+#define LLAMA_LOG_WARN ebbrt::kprintf
+#define LLAMA_LOG_ERROR ebbrt::kprintf
+#else
 #define LLAMA_LOG_INFO(...)  llama_log_internal(GGML_LOG_LEVEL_INFO , __VA_ARGS__)
 #define LLAMA_LOG_WARN(...)  llama_log_internal(GGML_LOG_LEVEL_WARN , __VA_ARGS__)
 #define LLAMA_LOG_ERROR(...) llama_log_internal(GGML_LOG_LEVEL_ERROR, __VA_ARGS__)
+#endif
 
 //
 // helpers
@@ -1449,6 +1455,11 @@ public:
     size_t size;
 
     llama_file(const char * fname, const char * mode) {
+#ifdef _EBBRT_
+        size = tGLLMbuf->ComputeChainDataLength();
+	ebbrt::kprintf("llama_file size: %u\n", size);
+	fp = nullptr;
+#else
         fp = ggml_fopen(fname, mode);
         if (fp == NULL) {
             throw std::runtime_error(format("failed to open %s: %s", fname, strerror(errno)));
@@ -1456,9 +1467,13 @@ public:
         seek(0, SEEK_END);
         size = tell();
         seek(0, SEEK_SET);
+#endif
     }
 
     size_t tell() const {
+#ifdef _EBBRT_
+      EBBRT_UNIMPLEMENTED();
+#endif      
 #ifdef _WIN32
         __int64 ret = _ftelli64(fp);
 #else
@@ -1472,6 +1487,9 @@ public:
     }
 
     void seek(size_t offset, int whence) const {
+#ifdef _EBBRT_
+      EBBRT_UNIMPLEMENTED();
+#endif      
 #ifdef _WIN32
         int ret = _fseeki64(fp, (__int64) offset, whence);
 #else
@@ -1483,6 +1501,9 @@ public:
     }
 
     void read_raw(void * ptr, size_t len) const {
+#ifdef _EBBRT_
+      EBBRT_UNIMPLEMENTED();
+#endif      
         if (len == 0) {
             return;
         }
@@ -1497,12 +1518,18 @@ public:
     }
 
     uint32_t read_u32() const {
+#ifdef _EBBRT_
+      EBBRT_UNIMPLEMENTED();
+#endif      
         uint32_t ret;
         read_raw(&ret, sizeof(ret));
         return ret;
     }
 
     void write_raw(const void * ptr, size_t len) const {
+#ifdef _EBBRT_
+      EBBRT_UNIMPLEMENTED();
+#endif      
         if (len == 0) {
             return;
         }
@@ -1514,6 +1541,9 @@ public:
     }
 
     void write_u32(std::uint32_t val) const {
+#ifdef _EBBRT_
+      EBBRT_UNIMPLEMENTED();
+#endif      
         write_raw(&val, sizeof(val));
     }
 
@@ -1597,6 +1627,7 @@ struct llama_mmap {
         // otherwise, there is a risk of invalidating addresses that have been repurposed for other mappings
 #ifdef _EBBRT_
       int page_size = 0;
+      EBBRT_UNIMPLEMENTED();
 #else
       int page_size = sysconf(_SC_PAGESIZE);
 #endif
@@ -1774,6 +1805,7 @@ struct llama_mlock {
 
     static size_t lock_granularity() {
 #ifdef _EBBRT_
+      EBBRT_UNIMPLEMENTED();
       return 0;
 #else
       return (size_t) sysconf(_SC_PAGESIZE);
@@ -3367,9 +3399,16 @@ struct llama_model_loader {
             const int tensor_idx = gguf_find_tensor(gguf_ctx, name);
             offs = gguf_get_data_offset(gguf_ctx) + gguf_get_tensor_offset(gguf_ctx, tensor_idx);
 
+#ifdef _EBBRT_
+	    if (offs + ggml_nbytes(tensor) < offs || offs + ggml_nbytes(tensor) > file->size) {	      
+	      ebbrt::kprintf("tensor '%s' data is not within the file bounds, model is corrupted or incomplete", name);
+	      kassert(false);
+            }
+#else
             if (offs + ggml_nbytes(tensor) < offs || offs + ggml_nbytes(tensor) > file->size) {
                 throw std::runtime_error(format("tensor '%s' data is not within the file bounds, model is corrupted or incomplete", name));
             }
+#endif
         }
     };
     std::vector<llama_tensor_weight> weights;
@@ -3382,10 +3421,11 @@ struct llama_model_loader {
     std::string arch_name;
     LLM_KV      llm_kv    = LLM_KV(LLM_ARCH_UNKNOWN);
 
-    llama_model_loader(const std::string & fname, bool use_mmap, bool check_tensors, const struct llama_model_kv_override * param_overrides_p) {      
+    llama_model_loader(const std::string & fname, bool use_mmap, bool check_tensors, const struct llama_model_kv_override * param_overrides_p) {
+      int trace = 0;
       unsigned char* file = tGLLMbuf->MutData();
       unsigned char* beginfile = file;
-
+      
       ebbrt::kprintf("[%s] tGLLMbuf len=%u addr:%p %p %p\n", __func__, tGLLMbuf->ComputeChainDataLength(), tGLLMbuf->MutData(), file, beginfile);
       
       if (param_overrides_p != nullptr) {
@@ -3404,9 +3444,154 @@ struct llama_model_loader {
       if (!meta) {
       	throw std::runtime_error(format("%s: failed to load model from %s\n", __func__, fname.c_str()));
       }
-
       ebbrt::kprintf("[%s] FIN gguf_init_from_buffer\n", __func__);
+      
+      get_key(llm_kv(LLM_KV_GENERAL_ARCHITECTURE), arch_name, false);
+      ebbrt::kprintf("arch_name: %s\n", arch_name.c_str());
+      llm_kv = LLM_KV(llm_arch_from_string(arch_name));
 
+      files.emplace_back(new llama_file(fname.c_str(), "rb"));
+      contexts.emplace_back(ctx);
+
+      // Save tensors data offset of the main file.
+      // For subsidiary files, `meta` tensor data offset must not be used,
+      // so we build a unified tensors index for weights.
+      for (ggml_tensor * cur = ggml_get_first_tensor(ctx); cur; cur = ggml_get_next_tensor(ctx, cur)) {
+	weights.emplace_back(files.back().get(), 0, cur->name, meta, cur);
+      }
+      
+      uint16_t n_split = 0;
+      get_key(llm_kv(LLM_KV_SPLIT_COUNT), n_split, false);
+
+      // Load additional GGML contexts
+      if (n_split > 1) {
+	EBBRT_UNIMPLEMENTED();
+      }
+      
+      n_kv      = gguf_get_n_kv(meta);
+      n_tensors = weights.size();
+      
+      fver = (enum llama_fver) gguf_get_version(meta);
+      
+      std::set<std::string> tensor_names;
+      for (auto & w : weights) {
+	n_elements += ggml_nelements(w.tensor);
+	n_bytes    += ggml_nbytes(w.tensor);
+	// make sure there is no duplicated tensor names
+	const std::string name(w.tensor->name);
+	auto found = tensor_names.find(name);
+	if (found != tensor_names.end()) {
+	  ebbrt::kprintf("invalid model: tensor '%s' is duplicated", w.tensor->name);
+	  kassert(false);
+	}
+	tensor_names.insert(name);
+      }
+      
+      ebbrt::kprintf("%s: loaded meta data with %d key-value pairs and %d tensors from %s (version %s)\n",
+		     __func__, n_kv, n_tensors, fname.c_str(), llama_file_version_name(fver));
+      
+      // determine file type based on the number of tensors for each quantization and print meta data
+      // TODO: make optional
+      {
+	std::map<enum ggml_type, uint32_t> n_type;
+
+	uint32_t n_type_max = 0;
+	enum ggml_type type_max = GGML_TYPE_F32;
+
+	for (int i = 0; i < n_tensors; i++) {
+	  const ggml_tensor * tensor = weights.at(i).tensor;
+	  enum ggml_type type = tensor->type;
+
+	  n_type[type]++;
+
+	  if (n_type_max < n_type[type]) {
+	    n_type_max = n_type[type];
+	    type_max   = type;
+	  }
+
+	  if (trace > 0) {
+	    const uint16_t sid = weights.at(i).idx;
+	    ebbrt::kprintf("%s: - tensor %4d, split %2d: %32s %-8s [ %s ]\n", __func__, i, sid, ggml_get_name(tensor), ggml_type_name(type), llama_format_tensor_shape(tensor).c_str());
+	  }
+	}
+
+	switch (type_max) {
+	case GGML_TYPE_F32:     ftype = LLAMA_FTYPE_ALL_F32;        break;
+	case GGML_TYPE_F16:     ftype = LLAMA_FTYPE_MOSTLY_F16;     break;
+	case GGML_TYPE_BF16:    ftype = LLAMA_FTYPE_MOSTLY_BF16;    break;
+	case GGML_TYPE_Q4_0:    ftype = LLAMA_FTYPE_MOSTLY_Q4_0;    break;
+	case GGML_TYPE_Q4_1:    ftype = LLAMA_FTYPE_MOSTLY_Q4_1;    break;
+	case GGML_TYPE_Q5_0:    ftype = LLAMA_FTYPE_MOSTLY_Q5_0;    break;
+	case GGML_TYPE_Q5_1:    ftype = LLAMA_FTYPE_MOSTLY_Q5_1;    break;
+	case GGML_TYPE_Q8_0:    ftype = LLAMA_FTYPE_MOSTLY_Q8_0;    break;
+	case GGML_TYPE_Q2_K:    ftype = LLAMA_FTYPE_MOSTLY_Q2_K;    break;
+	case GGML_TYPE_Q3_K:    ftype = LLAMA_FTYPE_MOSTLY_Q3_K_M;  break;
+	case GGML_TYPE_Q4_K:    ftype = LLAMA_FTYPE_MOSTLY_Q4_K_M;  break;
+	case GGML_TYPE_Q5_K:    ftype = LLAMA_FTYPE_MOSTLY_Q5_K_M;  break;
+	case GGML_TYPE_Q6_K:    ftype = LLAMA_FTYPE_MOSTLY_Q6_K;    break;
+	case GGML_TYPE_IQ2_XXS: ftype = LLAMA_FTYPE_MOSTLY_IQ2_XXS; break;
+	case GGML_TYPE_IQ2_XS:  ftype = LLAMA_FTYPE_MOSTLY_IQ2_XS;  break;
+	case GGML_TYPE_IQ2_S:   ftype = LLAMA_FTYPE_MOSTLY_IQ2_S;   break;
+	case GGML_TYPE_IQ3_XXS: ftype = LLAMA_FTYPE_MOSTLY_IQ3_XXS; break;
+	case GGML_TYPE_IQ1_S:   ftype = LLAMA_FTYPE_MOSTLY_IQ1_S;   break;
+	case GGML_TYPE_IQ1_M:   ftype = LLAMA_FTYPE_MOSTLY_IQ1_M;   break;
+	case GGML_TYPE_IQ4_NL:  ftype = LLAMA_FTYPE_MOSTLY_IQ4_NL;  break;
+	case GGML_TYPE_IQ4_XS:  ftype = LLAMA_FTYPE_MOSTLY_IQ4_XS;  break;
+	case GGML_TYPE_IQ3_S:   ftype = LLAMA_FTYPE_MOSTLY_IQ3_S;   break;
+	default:
+	  {
+	    ebbrt::kprintf("%s: unknown type %s\n", __func__, ggml_type_name(type_max));
+	    ftype = LLAMA_FTYPE_ALL_F32;
+	  } break;
+	}
+
+	// this is a way to mark that we have "guessed" the file type
+	ftype = (llama_ftype) (ftype | LLAMA_FTYPE_GUESSED);
+
+	{
+	  const int kid = gguf_find_key(meta, "general.file_type");
+	  if (kid >= 0) {
+	    ftype = (llama_ftype) gguf_get_val_u32(meta, kid);
+	  }
+	}
+
+	ebbrt::kprintf("%s: Dumping metadata keys/values. Note: KV overrides do not apply in this output.\n", __func__);
+
+	for (int i = 0; i < n_kv; i++) {
+	  const char * name           = gguf_get_key(meta, i);
+	  const enum gguf_type type   = gguf_get_kv_type(meta, i);
+	  const std::string type_name =
+	    type == GGUF_TYPE_ARRAY
+	    ? format("%s[%s,%d]", gguf_type_name(type), gguf_type_name(gguf_get_arr_type(meta, i)), gguf_get_arr_n(meta, i))
+	    : gguf_type_name(type);
+
+	  std::string value          = gguf_kv_to_str(meta, i);
+	  const size_t MAX_VALUE_LEN = 40;
+	  if (value.size() > MAX_VALUE_LEN) {
+	    value = format("%s...", value.substr(0, MAX_VALUE_LEN - 3).c_str());
+	  }
+	  replace_all(value, "\n", "\\n");
+
+	  ebbrt::kprintf("%s: - kv %3d: %42s %-16s = %s\n", __func__, i, name, type_name.c_str(), value.c_str());
+	}
+
+	// print type counts
+	for (auto & kv : n_type) {
+	  if (kv.second == 0) {
+	    continue;
+	  }
+
+	  ebbrt::kprintf("%s: - type %4s: %4d tensors\n", __func__, ggml_type_name(kv.first), kv.second);
+	}
+      }
+
+      if (!llama_mmap::SUPPORTED) {
+        ebbrt::kprintf("%s: mmap is not supported on this platform\n", __func__);
+	use_mmap = false;
+      }
+      
+      this->use_mmap = use_mmap;
+      this->check_tensors = check_tensors;
       
 #if 0
         int trace = 0;
@@ -3487,7 +3672,7 @@ struct llama_model_loader {
 
                 gguf_free(ctx_gguf);
             }
-
+	    
             get_key(llm_kv(LLM_KV_SPLIT_TENSORS_COUNT), n_tensors);
 
             // sanity check
@@ -3942,6 +4127,7 @@ struct llama_model_loader {
             llama_mlocks * lmlocks,
             llama_progress_callback progress_callback,
             void * progress_callback_user_data) {
+#if 0
         GGML_ASSERT(size_data != 0 && "call init_mappings() first");
 
         std::vector<no_init<uint8_t>> read_buf;
@@ -4123,6 +4309,7 @@ struct llama_model_loader {
         }
 
         return true;
+#endif
     }
 };
 
@@ -5383,6 +5570,7 @@ static bool llm_load_tensors(
         bool use_mlock,
         llama_progress_callback progress_callback,
         void * progress_callback_user_data) {
+
     model.t_start_us = ggml_time_us();
 
     auto & hparams = model.hparams;
@@ -5535,6 +5723,7 @@ static bool llm_load_tensors(
         model.layers.resize(n_layer);
 
         const auto tn = LLM_TN(model.arch);
+#if 0
         switch (model.arch) {
             case LLM_ARCH_LLAMA:
             case LLM_ARCH_REFACT:
@@ -6798,7 +6987,9 @@ static bool llm_load_tensors(
             default:
                 throw std::runtime_error("unknown architecture");
         }
+#endif
     }
+
 
     ml.done_getting_tensors();
 
@@ -6921,6 +7112,7 @@ static bool llm_load_tensors(
         }
     }
 
+
     // load tensor data
     for (auto & it : ctx_bufs) {
         ggml_context * ctx = it.first;
@@ -6929,7 +7121,7 @@ static bool llm_load_tensors(
             return false;
         }
     }
-
+#if 0
     if (use_mmap_buffer) {
         for (auto & mapping : ml.mappings) {
             model.mappings.emplace_back(std::move(mapping));
@@ -6939,14 +7131,12 @@ static bool llm_load_tensors(
     // loading time will be recalculate after the first eval, so
     // we take page faults deferred by mmap() into consideration
     model.t_load_us = ggml_time_us() - model.t_start_us;
+#endif
     return true;
 }
 
 // Returns 0 on success, -1 on error, and -2 on cancellation via llama_progress_callback
 static int llama_model_load(const std::string & fname, llama_model & model, llama_model_params & params) {
-#ifdef _EBBRT_
-  llama_model_loader ml(fname, params.use_mmap, params.check_tensors, params.kv_overrides);
-#else
     try {
         llama_model_loader ml(fname, params.use_mmap, params.check_tensors, params.kv_overrides);
 
@@ -6997,17 +7187,13 @@ static int llama_model_load(const std::string & fname, llama_model & model, llam
         }
 #endif
 
-        if (!llm_load_tensors(
-            ml, model, params.n_gpu_layers, params.split_mode,  params.main_gpu, params.tensor_split, params.use_mlock,
-            params.progress_callback, params.progress_callback_user_data
-        )) {
+        if (!llm_load_tensors(ml, model, params.n_gpu_layers, params.split_mode,  params.main_gpu, params.tensor_split, params.use_mlock, params.progress_callback, params.progress_callback_user_data)) {
             return -2;
-        }
+	}
     } catch (const std::exception & err) {
         LLAMA_LOG_ERROR("%s: error loading model: %s\n", __func__, err.what());
         return -1;
     }
-#endif //_EBBRT_
     return 0;
 }
 
@@ -16623,9 +16809,7 @@ struct llama_model * llama_load_model_from_file(
     ggml_time_init();
     llama_model * model = new llama_model;
     int status = llama_model_load(path_model, *model, params);
-    GGML_ASSERT(status <= 0);
-    
-    EBBRT_UNIMPLEMENTED();
+    kassert(status <= 0);
     return model;
 #endif
 }
