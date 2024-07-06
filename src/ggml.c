@@ -284,12 +284,14 @@ inline static void * ggml_aligned_malloc(size_t size) {
 #ifdef _EBBRT_
 inline static void * eggml_malloc(size_t size) {
     void * result = malloc(size);
+    memset(result, 0, size);
     return result;
 }
 
 // calloc
 inline static void * eggml_calloc(size_t num, size_t size) {
   void * result = malloc((int)num*(int)size);
+  memset(result, 0, num*size);
   return result;
 }
 
@@ -20781,6 +20783,9 @@ static bool gguf_fread_str(unsigned char * file, struct gguf_str * p, size_t * o
     
     ok = ok && gguf_fread_el(file,  p->data, p->n, offset);
 
+    // for some reason this is required
+    //p->data[p->n] = '\0';
+    
     return ok;
 }
 #else
@@ -20929,13 +20934,16 @@ struct gguf_context * gguf_init_from_buffer(unsigned char *file, struct gguf_ini
     for (uint64_t i = 0; i < n_kv; ++i) {
       struct gguf_kv * kv = &ctx->kv[i];
 
-      //fprintf(stderr, "%s: reading kv %d\n", __func__, i);
+      snprintf(buffer, 100, "%s: reading kv %ld\n", __func__, i);
+      eprint(buffer);
 
       ok = ok && gguf_fread_str(file, &kv->key,                    &offset);
       ok = ok && gguf_fread_el (file, &kv->type, sizeof(kv->type), &offset);
 
       //fprintf(stderr, "%s: reading kv with key %s\n", __func__, kv->key.data);
-
+      snprintf(buffer, 100, "%s: reading kv with key %s\n", __func__, kv->key.data);
+      eprint(buffer);
+      
       switch (kv->type) {
       case GGUF_TYPE_UINT8:   ok = ok && gguf_fread_el (file, &kv->value.uint8,   sizeof(kv->value.uint8),   &offset); break;
       case GGUF_TYPE_INT8:    ok = ok && gguf_fread_el (file, &kv->value.int8,    sizeof(kv->value.int8),    &offset); break;
@@ -20953,7 +20961,11 @@ struct gguf_context * gguf_init_from_buffer(unsigned char *file, struct gguf_ini
 	{
 	  ok = ok && gguf_fread_el(file, &kv->value.arr.type, sizeof(kv->value.arr.type), &offset);
 	  ok = ok && gguf_fread_el(file, &kv->value.arr.n,    sizeof(kv->value.arr.n),    &offset);
-
+	  if(i == 12) {
+	    snprintf(buffer, 100, "%s: arr.n=%u\n", __func__, kv->value.arr.n);
+	    eprint(buffer);
+	  }
+	  
 	  switch (kv->value.arr.type) {
 	  case GGUF_TYPE_UINT8:
 	  case GGUF_TYPE_INT8:
@@ -21002,6 +21014,11 @@ struct gguf_context * gguf_init_from_buffer(unsigned char *file, struct gguf_ini
 	      
 	      for (uint64_t j = 0; j < kv->value.arr.n; ++j) {
 		ok = ok && gguf_fread_str(file, &((struct gguf_str *) kv->value.arr.data)[j], &offset);
+		if(i == 12 && j < 100) {
+		  struct gguf_str * tmp = &((struct gguf_str *) kv->value.arr.data)[j];
+		  snprintf(buffer, 100, "%s: n=%u data=%s offset=%d\n", __func__, tmp->n, tmp->data, offset);
+		  eprint(buffer);
+		}				
 	      }
 	    } break;
 	  case GGUF_TYPE_ARRAY:

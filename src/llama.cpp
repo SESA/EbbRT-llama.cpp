@@ -1287,6 +1287,9 @@ static std::string gguf_kv_to_str(const struct gguf_context * ctx_gguf, int i) {
                 for (int j = 0; j < arr_n; j++) {
                     if (arr_type == GGUF_TYPE_STRING) {
                         std::string val = gguf_get_arr_str(ctx_gguf, i, j);
+			if (i == 12 && j < 100) {
+			  LLAMA_LOG_INFO("%s: GGUF_TYPE_ARRAY arr_n %d val %s\n", __func__, arr_n, val.c_str());
+			}
                         // escape quotes
                         replace_all(val, "\\", "\\\\");
                         replace_all(val, "\"", "\\\"");
@@ -3487,7 +3490,7 @@ struct llama_model_loader {
 
 	  std::string value          = gguf_kv_to_str(meta, i);
 	  //const size_t MAX_VALUE_LEN = 40;
-	  const size_t MAX_VALUE_LEN = 5000;
+	  const size_t MAX_VALUE_LEN = 100;
 	  if (value.size() > MAX_VALUE_LEN) {
 	    value = format("%s...", value.substr(0, MAX_VALUE_LEN - 3).c_str());
 	  }
@@ -4882,9 +4885,8 @@ static void llm_load_vocab(
             }
         }
     }
-    EBBDP;
-    
-    //EGGML_ASSERT(vocab.id_to_token.size() == vocab.token_to_id.size());    
+
+    EGGML_ASSERT(vocab.id_to_token.size() == vocab.token_to_id.size());    
 
     // determine the newline token: LLaMA "<0x0A>" == 10 == '\n', Falcon 193 == '\n'
     if (vocab.type == LLAMA_VOCAB_TYPE_SPM) {
