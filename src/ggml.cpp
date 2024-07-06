@@ -14,7 +14,7 @@ typedef void * thread_ret_t;
 typedef thread_ret_t (*FunctionPtr)(void *);
 //typedef void (*FunctionPtr)(void*);
 extern "C" void eassert(char* s, int line, bool b) {
-  ebbrt::kprintf("%s: %d\n", s, line);
+  //ebbrt::kprintf("%s: %d\n", s, line);
   kassert(b);
 }
 extern "C" void eprint(char *s) {

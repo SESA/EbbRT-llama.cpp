@@ -15,6 +15,10 @@
 #include <locale>
 #include <codecvt>
 
+#ifdef _EBBRT_
+#include <ebbrt/Debug.h>
+#endif
+
 static std::string unicode_cpts_to_utf8(const std::vector<uint32_t> & cps) {
     std::string result;
     for (size_t i = 0; i < cps.size(); ++i) {
@@ -24,6 +28,53 @@ static std::string unicode_cpts_to_utf8(const std::vector<uint32_t> & cps) {
 }
 
 static uint32_t unicode_cpt_from_utf8(const std::string & utf8, size_t & offset) {
+#ifdef _EBBRT_
+    kassert(offset < utf8.size());
+    offset -= 1;
+    if (!(utf8[offset + 0] & 0x80)) {
+        auto result = utf8[offset + 0];
+        offset += 1;
+        return result;
+    }
+    if (!(utf8[offset + 0] & 0x40)) {
+      ebbrt::kprintf("invalid character %s offset %u\n", utf8.c_str(), offset);
+      kassert(false);
+      //throw std::invalid_argument("invalid character");
+    }
+    if (!(utf8[offset + 0] & 0x20)) {
+        if (offset + 1 >= utf8.size() || ! ((utf8[offset + 1] & 0xc0) == 0x80)) {
+	  ebbrt::kprintf("invalid character %s offset %u\n", utf8.c_str(), offset);
+	  kassert(false);
+	  //throw std::invalid_argument("invalid character");
+        }
+        auto result = ((utf8[offset + 0] & 0x1f) << 6) | (utf8[offset + 1] & 0x3f);
+        offset += 2;
+        return result;
+    }
+    if (!(utf8[offset + 0] & 0x10)) {
+        if (offset + 2 >= utf8.size() || ! ((utf8[offset + 1] & 0xc0) == 0x80) || ! ((utf8[offset + 2] & 0xc0) == 0x80)) {
+	  ebbrt::kprintf("invalid character %s offset %u\n", utf8.c_str(), offset);
+	  kassert(false);
+	  //throw std::invalid_argument("invalid character");
+        }
+        auto result = ((utf8[offset + 0] & 0x0f) << 12) | ((utf8[offset + 1] & 0x3f) << 6) | (utf8[offset + 2] & 0x3f);
+        offset += 3;
+        return result;
+    }
+    if (!(utf8[offset + 0] & 0x08)) {
+        if (offset + 3 >= utf8.size() || ! ((utf8[offset + 1] & 0xc0) == 0x80) || ! ((utf8[offset + 2] & 0xc0) == 0x80) || !((utf8[offset + 3] & 0xc0) == 0x80)) {
+	  ebbrt::kprintf("invalid character %s offset %u\n", utf8.c_str(), offset);
+	  kassert(false);
+	  //throw std::invalid_argument("invalid character");
+        }
+        auto result = ((utf8[offset + 0] & 0x07) << 18) | ((utf8[offset + 1] & 0x3f) << 12) | ((utf8[offset + 2] & 0x3f) << 6) | (utf8[offset + 3] & 0x3f);
+        offset += 4;
+        return result;
+    }
+    ebbrt::kprintf("failed to convert utf8 to codepoint");
+    kassert(false);
+    //throw std::invalid_argument("failed to convert utf8 to codepoint");
+#else
     assert(offset < utf8.size());
     if (!(utf8[offset + 0] & 0x80)) {
         auto result = utf8[offset + 0];
@@ -58,6 +109,7 @@ static uint32_t unicode_cpt_from_utf8(const std::string & utf8, size_t & offset)
         return result;
     }
     throw std::invalid_argument("failed to convert utf8 to codepoint");
+#endif
 }
 
 //static std::vector<uint16_t> unicode_cpt_to_utf16(uint32_t cp) {
@@ -112,8 +164,8 @@ static uint32_t unicode_cpt_from_utf8(const std::string & utf8, size_t & offset)
 static std::vector<codepoint_flags> unicode_cpt_flags_array() {
     std::vector<codepoint_flags> cpt_flags(MAX_CODEPOINTS, codepoint_flags::UNDEFINED);
 
-    assert (unicode_ranges_flags.front().first == 0);
-    assert (unicode_ranges_flags.back().first == MAX_CODEPOINTS);
+    kassert (unicode_ranges_flags.front().first == 0);
+    kassert (unicode_ranges_flags.back().first == MAX_CODEPOINTS);
     for (size_t i = 1; i < unicode_ranges_flags.size(); ++i) {
         const auto range_ini = unicode_ranges_flags[i-1];  // codepoint_ini, flags
         const auto range_end = unicode_ranges_flags[i];    // codepoint_end, flags
@@ -144,15 +196,15 @@ static std::vector<codepoint_flags> unicode_cpt_flags_array() {
 static std::unordered_map<uint8_t, std::string> unicode_byte_to_utf8_map() {
     std::unordered_map<uint8_t, std::string> map;
     for (int ch = 0x21; ch <= 0x7E; ++ch) {  // u'!' to u'~'
-        assert(0 <= ch && ch < 256);
+        kassert(0 <= ch && ch < 256);
         map[ch] = unicode_cpt_to_utf8(ch);
     }
     for (int ch = 0xA1; ch <= 0xAC; ++ch) {  // u'¡' to u'¬'
-        assert(0 <= ch && ch < 256);
+        kassert(0 <= ch && ch < 256);
         map[ch] = unicode_cpt_to_utf8(ch);
     }
     for (int ch = 0xAE; ch <= 0xFF; ++ch) {  // u'®' to u'ÿ'
-        assert(0 <= ch && ch < 256);
+        kassert(0 <= ch && ch < 256);
         map[ch] = unicode_cpt_to_utf8(ch);
     }
     auto n = 0;
@@ -168,15 +220,15 @@ static std::unordered_map<uint8_t, std::string> unicode_byte_to_utf8_map() {
 static std::unordered_map<std::string, uint8_t> unicode_utf8_to_byte_map() {
     std::unordered_map<std::string, uint8_t> map;
     for (int ch = 0x21; ch <= 0x7E; ++ch) {  // u'!' to u'~'
-        assert(0 <= ch && ch < 256);
+        kassert(0 <= ch && ch < 256);
         map[unicode_cpt_to_utf8(ch)] = ch;
     }
     for (int ch = 0xA1; ch <= 0xAC; ++ch) {  // u'¡' to u'¬'
-        assert(0 <= ch && ch < 256);
+        kassert(0 <= ch && ch < 256);
         map[unicode_cpt_to_utf8(ch)] = ch;
     }
     for (int ch = 0xAE; ch <= 0xFF; ++ch) {  // u'®' to u'ÿ'
-        assert(0 <= ch && ch < 256);
+        kassert(0 <= ch && ch < 256);
         map[unicode_cpt_to_utf8(ch)] = ch;
     }
     auto n = 0;
@@ -223,7 +275,7 @@ static std::vector<size_t> unicode_regex_split_custom_gpt2(const std::string & t
     for (auto offset : offsets) {
         const size_t offset_ini = start;
         const size_t offset_end = start + offset;
-        assert(offset_end <= cpts.size());
+        kassert(offset_end <= cpts.size());
         start = offset_end;
 
         static const uint32_t OUT_OF_RANGE = 0xFFFFFFFF;
@@ -238,7 +290,7 @@ static std::vector<size_t> unicode_regex_split_custom_gpt2(const std::string & t
 
         size_t _prev_end = offset_ini;
         auto _add_token = [&] (const size_t end) -> size_t {
-            assert(_prev_end <= end && end <= offset_end);
+	    kassert(_prev_end <= end && end <= offset_end);
             size_t len = end - _prev_end;
             if (len > 0) {
                 bpe_offsets.push_back(len);
@@ -342,7 +394,7 @@ static std::vector<size_t> unicode_regex_split_custom_llama3(const std::string &
     for (auto offset : offsets) {
         const size_t offset_ini = start;
         const size_t offset_end = start + offset;
-        assert(offset_end <= cpts.size());
+        kassert(offset_end <= cpts.size());
         start = offset_end;
 
         static const uint32_t OUT_OF_RANGE = 0xFFFFFFFF;
@@ -357,7 +409,7 @@ static std::vector<size_t> unicode_regex_split_custom_llama3(const std::string &
 
         size_t _prev_end = offset_ini;
         auto _add_token = [&] (const size_t end) -> size_t {
-            assert(_prev_end <= end && end <= offset_end);
+            kassert(_prev_end <= end && end <= offset_end);
             size_t len = end - _prev_end;
             if (len > 0) {
                 bpe_offsets.push_back(len);
@@ -578,7 +630,9 @@ std::string unicode_cpt_to_utf8(uint32_t cp) {
         return result;
     }
 
-    throw std::invalid_argument("invalid codepoint");
+    ebbrt::kprintf("invalid codepoint");
+    kassert(false);
+    //throw std::invalid_argument("invalid codepoint");
 }
 
 std::vector<uint32_t> unicode_cpts_normalize_nfd(const std::vector<uint32_t> & cpts) {
@@ -724,7 +778,9 @@ std::vector<std::string> unicode_regex_split(const std::string & text, const std
                 const auto cpts_regex = unicode_cpts_from_utf8(regex_expr);
                 for (size_t i = 0; i < cpts_regex.size(); ++i) {
                     if (cpts_regex[i] >= 128) {
-                        throw std::runtime_error("Regex includes both unicode categories and non-ASCII characters - not supported");
+		      ebbrt::kprintf("Regex includes both unicode categories and non-ASCII characters - not supported");
+		      kassert(false);
+		      //throw std::runtime_error("Regex includes both unicode categories and non-ASCII characters - not supported");
                     }
                 }
 
@@ -788,9 +844,11 @@ std::vector<std::string> unicode_regex_split(const std::string & text, const std
                 bpe_offsets = unicode_regex_split_stl(wtext, wregex_expr, bpe_offsets);
             }
         } catch (std::regex_error & e) {
-            fprintf(stderr, "Failed to process regex: '%s'\n", regex_expr.c_str());
-            fprintf(stderr, "Regex error: %s\n", e.what());
-            throw std::runtime_error("Failed to process regex");
+	  ebbrt::kprintf("Failed to process regex: '%s'\n", regex_expr.c_str());
+	  kassert(false);
+	  //fprintf(stderr, "Failed to process regex: '%s'\n", regex_expr.c_str());
+          //  fprintf(stderr, "Regex error: %s\n", e.what());
+          //  throw std::runtime_error("Failed to process regex");
         }
     }
 
